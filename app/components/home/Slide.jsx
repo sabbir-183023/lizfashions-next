@@ -4,7 +4,7 @@
 
 import Image from "next/image";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import "../../../styles/Slide.scss";
+import "../../styles/Slide.scss";
 
 // Shimmer loading component
 const ShimmerCard = () => (
