@@ -1,9 +1,14 @@
 import Image from "next/image";
 import WelcomeText from "./components/home/WelcomeText";
+import Slides from "./components/home/Slide";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+    <div>
+      <div className="isolate-slides hardware-accelerated">
+        <Slides />
+      </div>
+      {/* Welcome text */}
       <WelcomeText/>
     </div>
   );
