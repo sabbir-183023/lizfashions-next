@@ -3,6 +3,8 @@ import WelcomeText from "./components/home/WelcomeText";
 import Slides from "./components/home/Slide";
 import Link from "next/link";
 import LatestProducts from "./components/home/LatestProducts";
+import DiscountedProducts from "./components/home/DiscountedProducts";
+import HomeBlogs from "./components/home/HomeBlogs";
 
 export default function Home() {
   return (
@@ -98,6 +100,10 @@ export default function Home() {
       </div>
       {/* Latest Products */}
       <LatestProducts />
+      {/* Discounted Products */}
+      <DiscountedProducts />
+      {/* Blog Section */}
+      <HomeBlogs/>
     </div>
   );
 }
