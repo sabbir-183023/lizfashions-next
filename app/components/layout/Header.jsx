@@ -3,6 +3,7 @@ import Link from "next/link";
 import MobileMenu from "./MobileMenu";
 import { FaSearch } from "react-icons/fa";
 import CartIcon from "../home/CartIcon";
+import Logo from "../../../public/LiZFashions.png";
 
 const Header = () => {
   
@@ -14,7 +15,7 @@ const Header = () => {
         <div className="flex items-center">
           <Link href="/" className="flex items-center">
             <Image
-              src="/LiZfashions.png"
+              src={Logo}
               alt="logo"
               height={60}
               width={60}
@@ -105,7 +106,7 @@ const Header = () => {
       <div className="md:hidden flex items-center justify-between h-16">
         <Link href="/" className="flex items-center">
           <Image
-            src="/LiZfashions.png"
+            src={Logo}
             alt="logo"
             height={40}
             width={40}
