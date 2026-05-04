@@ -1,0 +1,4 @@
+Light Navyblue: #0E2238
+Deep Navyblue: #0B1A33
+
+Yellow: #FDC700

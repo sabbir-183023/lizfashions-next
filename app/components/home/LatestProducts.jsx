@@ -35,16 +35,15 @@ const LatestProducts = () => {
   };
 
   useEffect(() => {
-    //eslint-disable-next-line
     getAllProducts(1);
   }, []);
 
-  const handleAddToCart = async (product) => {
+  const handleAddToCart = async (product, e) => {
+    e.preventDefault();
+    e.stopPropagation();
     setAddingToCart(product._id);
 
-    // Simulate a small delay for better UX
     await new Promise((resolve) => setTimeout(resolve, 500));
-
     addToCart(product, 1);
     setAddingToCart(null);
   };
@@ -60,7 +59,7 @@ const LatestProducts = () => {
     if (!product.reviews || product.reviews.length === 0) return null;
     const total = product.reviews.reduce(
       (sum, review) => sum + review.stars,
-      0
+      0,
     );
     return (total / product.reviews.length).toFixed(1);
   };
@@ -137,46 +136,54 @@ const LatestProducts = () => {
                   </div>
                 )}
 
-                {/* Image Container */}
-                <div className="relative h-80 w-full overflow-hidden bg-gray-100">
-                  {product.photos && product.photos[0] && (
-                    <>
-                      <Image
-                        src={product.photos[0].url}
-                        alt={product.name}
-                        fill
-                        className="object-cover group-hover:scale-110 transition-transform duration-700"
-                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
-                        quality={60}
-                        loading="lazy"
-                        placeholder="blur"
-                        blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA8A/9k="
-                      />
-                      {/* Overlay with quick view button */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0B1E33]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                        <div className="absolute bottom-4 left-0 right-0 text-center">
-                          <button className="bg-[#FFD700] text-[#0B1E33] px-6 py-2 rounded-full font-semibold hover:bg-white transition-colors duration-300 transform hover:scale-105">
-                            Quick View
-                          </button>
+                {/* Image Container with Link */}
+                <Link href={`/product/${product?.slug}`}>
+                  <div className="relative h-80 w-full overflow-hidden bg-gray-100 cursor-pointer">
+                    {product.photos && product.photos[0] && (
+                      <>
+                        <Image
+                          src={product.photos[0].url}
+                          alt={product.name}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-700"
+                          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                          quality={60}
+                          loading="lazy"
+                          placeholder="blur"
+                          blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA8A/9k="
+                        />
+                        {/* Overlay with quick view button */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0B1E33]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                          <div className="absolute bottom-4 left-0 right-0 text-center">
+                            <Link href={`/product/${product?.slug}`}>
+                              <button
+                                className="bg-[#FFD700] text-[#0B1E33] px-6 py-2 rounded-full font-semibold hover:bg-white cursor-pointer transition-colors duration-300 transform hover:scale-105"
+                              >
+                                Quick View
+                              </button>
+                            </Link>
+                          </div>
                         </div>
-                      </div>
-                    </>
-                  )}
+                      </>
+                    )}
 
-                  {/* Color indicator */}
-                  {product.colors && product.colors[0] && (
-                    <div
-                      className="absolute top-4 right-4 w-8 h-8 rounded-full border-2 border-white shadow-lg"
-                      style={{ backgroundColor: product.colors[0] }}
-                    ></div>
-                  )}
-                </div>
+                    {/* Color indicator */}
+                    {product.colors && product.colors[0] && (
+                      <div
+                        className="absolute top-4 right-4 w-8 h-8 rounded-full border-2 border-white shadow-lg"
+                        style={{ backgroundColor: product.colors[0] }}
+                      ></div>
+                    )}
+                  </div>
+                </Link>
 
                 {/* Product Info */}
                 <div className="p-5">
-                  <h3 className="text-lg font-bold text-[#0B1E33] mb-2 line-clamp-2 min-h-[56px]">
-                    {product.name}
-                  </h3>
+                  <Link href={`/product/${product?.slug}`}>
+                    <h3 className="text-lg font-bold text-[#0B1E33] mb-2 line-clamp-2 min-h-[56px] hover:text-[#FFD700] transition-colors cursor-pointer">
+                      {product.name}
+                    </h3>
+                  </Link>
 
                   {/* Rating Stars */}
                   {averageRating && (
@@ -228,21 +235,24 @@ const LatestProducts = () => {
                   {product.quantity > 0 ? (
                     inCart ? (
                       <div className="space-y-2">
-                        <button className="w-full py-3 rounded-xl font-semibold bg-green-600 text-white hover:bg-green-700 transition-all duration-300 flex items-center justify-center gap-2">
+                        <button
+                          className="w-full py-3 rounded-xl font-semibold bg-green-600 text-white hover:bg-green-700 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
+                          disabled
+                        >
                           <FaCheck />
                           Added to Cart
                         </button>
-                        <Link href="/cart">
-                          <button className="w-full py-2 rounded-xl font-semibold bg-[#FFD700] text-[#0B1E33] hover:bg-[#FFD700]/90 transition-all duration-300 text-sm">
+                        <Link href="/cart" onClick={(e) => e.stopPropagation()}>
+                          <button className="w-full py-2 rounded-xl font-semibold bg-[#FFD700] text-[#0B1E33] hover:bg-[#FFD700]/90 transition-all duration-300 text-sm cursor-pointer">
                             View Cart ({cartQuantity})
                           </button>
                         </Link>
                       </div>
                     ) : (
                       <button
-                        onClick={() => handleAddToCart(product)}
+                        onClick={(e) => handleAddToCart(product, e)}
                         disabled={isAdding}
-                        className={`w-full py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
+                        className={`w-full py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
                           isAdding
                             ? "bg-gray-400 cursor-not-allowed"
                             : "bg-[#0B1E33] text-white hover:bg-[#FFD700] hover:text-[#0B1E33]"
@@ -285,7 +295,7 @@ const LatestProducts = () => {
         {/* View All Button */}
         <div className="text-center mt-12">
           <Link href={"/products"}>
-            <button className="bg-transparent border-2 border-[#FFD700] text-[#FFD700] px-8 py-3 rounded-full font-semibold hover:bg-[#FFD700] hover:text-[#0B1E33] transition-all duration-300 transform hover:scale-105">
+            <button className="bg-transparent border-2 border-[#FFD700] text-[#FFD700] px-8 py-3 rounded-full font-semibold hover:bg-[#FFD700] hover:text-[#0B1E33] transition-all duration-300 transform hover:scale-105 cursor-pointer">
               View All Products
             </button>
           </Link>

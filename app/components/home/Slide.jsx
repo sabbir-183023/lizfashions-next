@@ -1,15 +1,14 @@
 // app/components/home/Slides.jsx
-
 "use client";
 
 import Image from "next/image";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import "../../styles/Slide.scss";
 
-// Shimmer loading component
+// Shimmer loading component - Fixed to prevent overflow
 const ShimmerCard = () => (
-  <div className="shimmer-card" style={{ height: "100%", width: "100%" }}>
-    <div className="shimmer" />
+  <div className="shimmer-card-wrapper">
+    <div className="shimmer-card" />
   </div>
 );
 
@@ -25,7 +24,6 @@ const Slides = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      // Use relative path to your Next.js API
       const res = await fetch("/api/v1/slide");
       const data = await res.json();
 
@@ -137,14 +135,12 @@ const Slides = () => {
     (idx) => {
       if (idx === currentIndex) return;
 
-      // Reset interval
       if (slideIntervalRef.current) {
         clearInterval(slideIntervalRef.current);
       }
 
       setCurrentIndex(idx);
 
-      // Restart interval
       slideIntervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => (prev + 1) % contents.length);
       }, 3500);
@@ -154,8 +150,8 @@ const Slides = () => {
 
   if (loading) {
     return (
-      <div className="slides-container">
-        <div className="slides-wrapper">
+      <div className="slides-container-loading">
+        <div className="slides-wrapper-loading">
           <ShimmerCard />
         </div>
       </div>
