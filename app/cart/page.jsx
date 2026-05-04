@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useCart } from "@/context/CartContext";
 import Image from "next/image";
 import Link from "next/link";
-import { FaTrash, FaPlus, FaMinus, FaTag, FaTruck } from "react-icons/fa";
+import { FaTrash, FaPlus, FaMinus, FaTag, FaTruck, FaCheckCircle } from "react-icons/fa";
 
 // Shimmer loading component
 const CartShimmer = () => (
@@ -32,6 +32,37 @@ const CartShimmer = () => (
     </div>
   </div>
 );
+
+// Order Success Modal
+const OrderSuccessModal = ({ onClose }) => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-8 mx-4 text-center shadow-2xl animate-bounce-in">
+        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <FaCheckCircle className="text-green-500 text-4xl" />
+        </div>
+        <h3 className="text-2xl font-bold text-[#0E2238] mb-2">
+          অর্ডার সম্পন্ন হয়েছে!
+        </h3>
+        <p className="text-gray-600 mb-4">
+          আপনার অর্ডার সফলভাবে সম্পন্ন হয়েছে। ধন্যবাদ।
+        </p>
+        <Link href="/products">
+          <button className="bg-[#FDC700] text-[#0E2238] px-6 py-2 rounded-lg font-semibold hover:bg-[#FDC700]/90 transition">
+            কেনাকাটা চালিয়ে যান
+          </button>
+        </Link>
+      </div>
+    </div>
+  );
+};
 
 // District selector component with search - English & Bengali
 const DistrictSelector = ({ value, onChange, error }) => {
@@ -117,7 +148,7 @@ const DistrictSelector = ({ value, onChange, error }) => {
   return (
     <div className="relative">
       <label className="block text-sm font-medium text-gray-700 mb-1">
-        জেলা <span className="text-red-500">*</span>
+        District <span className="text-sm">(জেলা)</span> <span className="text-red-500">*</span>
       </label>
       <div
         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent cursor-pointer bg-white text-gray-800"
@@ -173,7 +204,7 @@ const CartItem = ({ item, onUpdateQuantity, onRemove }) => {
 
   return (
     <div className="flex gap-4 p-4 border rounded-lg bg-white hover:shadow-md transition-shadow">
-      <div className="relative w-24 h-24 flex-shrink-0">
+      <div className="relative w-22 h-24 flex-shrink-0">
         {item.photos?.[0] && (
           <Image
             src={item.photos[0].url}
@@ -232,10 +263,13 @@ const CartPage = () => {
     cartItems,
     updateQuantity,
     removeFromCart,
+    clearCart,
     getCartTotal,
     getCartCount,
   } = useCart();
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({
     name: "",
     district: "",
@@ -267,6 +301,19 @@ const CartPage = () => {
 
   const subtotal = getCartTotal();
   const total = subtotal + deliveryCharge - couponDiscount;
+
+  // Check if all mandatory fields are filled
+  const isFormValid = () => {
+    return (
+      customerInfo.name.trim() !== "" &&
+      customerInfo.district !== "" &&
+      customerInfo.policeStation.trim() !== "" &&
+      customerInfo.address.trim() !== "" &&
+      customerInfo.phone.trim() !== "" &&
+      /^01[3-9]\d{8}$/.test(customerInfo.phone) &&
+      cartItems.length > 0
+    );
+  };
 
   const validateForm = () => {
     const newErrors = {};
@@ -320,6 +367,11 @@ const CartPage = () => {
       return;
     }
 
+    setIsSubmitting(true);
+
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
     const orderData = {
       items: cartItems,
       customer: customerInfo,
@@ -328,17 +380,26 @@ const CartPage = () => {
       discount: couponDiscount,
       total,
       couponCode: couponDiscount > 0 ? couponCode : null,
+      orderDate: new Date().toISOString(),
     };
 
     console.log("Order placed:", orderData);
-    alert("অর্ডার সফলভাবে সম্পন্ন হয়েছে!");
+    
+    // Clear cart and show success modal
+    clearCart();
+    setIsSubmitting(false);
+    setShowSuccessModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowSuccessModal(false);
   };
 
   if (loading) {
     return <CartShimmer />;
   }
 
-  if (cartItems.length === 0) {
+  if (cartItems.length === 0 && !showSuccessModal) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-16 text-center">
         <div className="bg-white rounded-lg p-8 shadow-md">
@@ -357,205 +418,241 @@ const CartPage = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#0E2238] mb-8">
-        আমার কার্ট ({getCartCount()}টি পণ্য)
-      </h1>
+    <>
+      {/* Success Modal */}
+      {showSuccessModal && <OrderSuccessModal onClose={handleCloseModal} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Cart Items */}
-        <div className="lg:col-span-2 space-y-4">
-          {cartItems.map((item) => (
-            <CartItem
-              key={item._id}
-              item={item}
-              onUpdateQuantity={updateQuantity}
-              onRemove={removeFromCart}
-            />
-          ))}
+      <div className="max-w-6xl mx-auto py-8 px-4">
+        <h1 className="text-2xl text-center font-bold text-[#0E2238] mb-8">
+          In Cart ({getCartCount()} Products)
+        </h1>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Cart Items */}
+          <div className="lg:col-span-2 space-y-4">
+            {cartItems.map((item) => (
+              <CartItem
+                key={item._id}
+                item={item}
+                onUpdateQuantity={updateQuantity}
+                onRemove={removeFromCart}
+              />
+            ))}
+          </div>
+
+          {/* Order Summary */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg p-6 shadow-md border">
+              <h2 className="text-lg font-bold text-[#0E2238] mb-4">
+                অর্ডার সংক্ষেপ
+              </h2>
+
+              <div className="space-y-3 pb-4 border-b">
+                <div className="flex justify-between text-gray-700">
+                  <span>পণ্যের মূল্য ({getCartCount()}টি)</span>
+                  <span className="font-semibold text-gray-800">৳{subtotal}</span>
+                </div>
+                <div className="flex justify-between text-gray-700">
+                  <span className="flex items-center gap-1">
+                    <FaTruck size={14} className="text-gray-600" /> ডেলিভারি চার্জ
+                  </span>
+                  <span className="text-gray-800">৳{deliveryCharge}</span>
+                </div>
+                {couponDiscount > 0 && (
+                  <div className="flex justify-between text-green-600">
+                    <span>ছাড় (কুপন)</span>
+                    <span>- ৳{couponDiscount}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between pt-4 font-bold text-lg">
+                <span className="text-gray-800">মোট</span>
+                <span className="text-[#FDC700]">৳{total}</span>
+              </div>
+            </div>
+
+            {/* Coupon Section */}
+            <div className="bg-white rounded-lg p-4 sm:p-6 shadow-md border">
+              <h2 className="text-base sm:text-lg font-bold text-[#0E2238] mb-3 flex items-center gap-2">
+                <FaTag className="text-[#FDC700] text-sm sm:text-base" /> কুপন কোড
+              </h2>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="কুপন কোড লিখুন"
+                  className="flex-1 w-full px-3 sm:px-4 py-2 text-sm sm:text-base border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400"
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                />
+                <button
+                  onClick={handleApplyCoupon}
+                  disabled={isApplyingCoupon}
+                  className="w-full sm:w-auto px-4 py-2 text-sm sm:text-base bg-[#FDC700] text-[#0E2238] rounded-lg font-semibold hover:bg-[#FDC700]/90 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isApplyingCoupon ? "..." : "Apply"}
+                </button>
+              </div>
+              {couponMessage && (
+                <p
+                  className={`text-xs sm:text-sm mt-2 ${couponMessage.includes("✅") ? "text-green-600" : "text-red-500"}`}
+                >
+                  {couponMessage}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Order Summary */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg p-6 shadow-md border">
-            <h2 className="text-lg font-bold text-[#0E2238] mb-4">
-              অর্ডার সংক্ষেপ
-            </h2>
+        {/* Customer Information Form */}
+        <div className="mt-8 bg-white rounded-lg p-6 shadow-md border">
+          <h2 className="text-lg font-bold text-[#0E2238] mb-4">Customer's Info <span className="text-sm">(ক্রেতার তথ্য)</span></h2>
 
-            <div className="space-y-3 pb-4 border-b">
-              <div className="flex justify-between text-gray-700">
-                <span>পণ্যের মূল্য ({getCartCount()}টি)</span>
-                <span className="font-semibold text-gray-800">৳{subtotal}</span>
-              </div>
-              <div className="flex justify-between text-gray-700">
-                <span className="flex items-center gap-1">
-                  <FaTruck size={14} className="text-gray-600" /> ডেলিভারি চার্জ
-                </span>
-                <span className="text-gray-800">৳{deliveryCharge}</span>
-              </div>
-              {couponDiscount > 0 && (
-                <div className="flex justify-between text-green-600">
-                  <span>ছাড় (কুপন)</span>
-                  <span>- ৳{couponDiscount}</span>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Full Name <span className="text-sm">(সম্পূর্ণ নাম)</span> <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.name ? "border-red-500" : ""}`}
+                value={customerInfo.name}
+                onChange={(e) =>
+                  setCustomerInfo({ ...customerInfo, name: e.target.value })
+                }
+                placeholder="আপনার সম্পূর্ণ নাম লিখুন"
+              />
+              {errors.name && (
+                <p className="text-red-500 text-xs mt-1">{errors.name}</p>
               )}
             </div>
 
-            <div className="flex justify-between pt-4 font-bold text-lg">
-              <span className="text-gray-800">মোট</span>
-              <span className="text-[#FDC700]">৳{total}</span>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone No. <span className="text-sm">(ফোন নম্বর)</span> <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="tel"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.phone ? "border-red-500" : ""}`}
+                value={customerInfo.phone}
+                onChange={(e) =>
+                  setCustomerInfo({ ...customerInfo, phone: e.target.value })
+                }
+                placeholder="01XXXXXXXXX"
+              />
+              {errors.phone && (
+                <p className="text-red-500 text-xs mt-1">{errors.phone}</p>
+              )}
             </div>
-          </div>
 
-          {/* Coupon Section */}
-          <div className="bg-white rounded-lg p-4 sm:p-6 shadow-md border">
-            <h2 className="text-base sm:text-lg font-bold text-[#0E2238] mb-3 flex items-center gap-2">
-              <FaTag className="text-[#FDC700] text-sm sm:text-base" /> কুপন কোড
-            </h2>
-            <div className="flex flex-col sm:flex-row gap-2">
+            <DistrictSelector
+              value={customerInfo.district}
+              onChange={(district) =>
+                setCustomerInfo({ ...customerInfo, district })
+              }
+              error={errors.district}
+            />
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Thana/Upazilla <span className="text-sm">(থানা বা উপজেলার নাম)</span> <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
-                placeholder="কুপন কোড লিখুন"
-                className="flex-1 w-full px-3 sm:px-4 py-2 text-sm sm:text-base border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400"
-                value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.policeStation ? "border-red-500" : ""}`}
+                value={customerInfo.policeStation}
+                onChange={(e) =>
+                  setCustomerInfo({
+                    ...customerInfo,
+                    policeStation: e.target.value,
+                  })
+                }
+                placeholder="থানা বা উপজেলার নাম"
               />
-              <button
-                onClick={handleApplyCoupon}
-                disabled={isApplyingCoupon}
-                className="w-full sm:w-auto px-4 py-2 text-sm sm:text-base bg-[#FDC700] text-[#0E2238] rounded-lg font-semibold hover:bg-[#FDC700]/90 disabled:opacity-50 whitespace-nowrap"
-              >
-                {isApplyingCoupon ? "..." : "Check Coupon"}
-              </button>
+              {errors.policeStation && (
+                <p className="text-red-500 text-xs mt-1">
+                  {errors.policeStation}
+                </p>
+              )}
             </div>
-            {couponMessage && (
-              <p
-                className={`text-xs sm:text-sm mt-2 ${couponMessage.includes("✅") ? "text-green-600" : "text-red-500"}`}
-              >
-                {couponMessage}
-              </p>
-            )}
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Full Address <span className="text-sm">(সম্পূর্ণ ঠিকানা)</span> <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.address ? "border-red-500" : ""}`}
+                rows="2"
+                value={customerInfo.address}
+                onChange={(e) =>
+                  setCustomerInfo({ ...customerInfo, address: e.target.value })
+                }
+                placeholder="বাড়ির নম্বর, রাস্তা, এলাকা"
+              />
+              {errors.address && (
+                <p className="text-red-500 text-xs mt-1">{errors.address}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ইমেইল (Optional)
+              </label>
+              <input
+                type="email"
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400"
+                value={customerInfo.email}
+                onChange={(e) =>
+                  setCustomerInfo({ ...customerInfo, email: e.target.value })
+                }
+                placeholder="your@email.com"
+              />
+            </div>
           </div>
+        </div>
+
+        {/* Place Order Button */}
+        <div className="mt-6 flex justify-center">
+          <button
+            onClick={handlePlaceOrder}
+            disabled={!isFormValid() || isSubmitting}
+            className={`bg-[#FDC700] text-[#0E2238] px-8 py-3 rounded-lg font-bold text-lg transition-all duration-300 ${
+              !isFormValid() || isSubmitting
+                ? "opacity-50 cursor-not-allowed"
+                : "hover:bg-[#FDC700]/90 hover:scale-105 cursor-pointer"
+            }`}
+          >
+            {isSubmitting ? (
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 border-2 border-[#0E2238] border-t-transparent rounded-full animate-spin"></div>
+                প্রক্রিয়াকরণে...
+              </div>
+            ) : (
+              "অর্ডার সম্পন্ন করুন"
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Customer Information Form */}
-      <div className="mt-8 bg-white rounded-lg p-6 shadow-md border">
-        <h2 className="text-lg font-bold text-[#0E2238] mb-4">প্রাপকের তথ্য</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              সম্পূর্ণ নাম <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.name ? "border-red-500" : ""}`}
-              value={customerInfo.name}
-              onChange={(e) =>
-                setCustomerInfo({ ...customerInfo, name: e.target.value })
-              }
-              placeholder="আপনার সম্পূর্ণ নাম লিখুন"
-            />
-            {errors.name && (
-              <p className="text-red-500 text-xs mt-1">{errors.name}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ফোন নম্বর <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="tel"
-              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.phone ? "border-red-500" : ""}`}
-              value={customerInfo.phone}
-              onChange={(e) =>
-                setCustomerInfo({ ...customerInfo, phone: e.target.value })
-              }
-              placeholder="01XXXXXXXXX"
-            />
-            {errors.phone && (
-              <p className="text-red-500 text-xs mt-1">{errors.phone}</p>
-            )}
-          </div>
-
-          <DistrictSelector
-            value={customerInfo.district}
-            onChange={(district) =>
-              setCustomerInfo({ ...customerInfo, district })
-            }
-            error={errors.district}
-          />
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              থানা/উপজেলা <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.policeStation ? "border-red-500" : ""}`}
-              value={customerInfo.policeStation}
-              onChange={(e) =>
-                setCustomerInfo({
-                  ...customerInfo,
-                  policeStation: e.target.value,
-                })
-              }
-              placeholder="থানা বা উপজেলার নাম"
-            />
-            {errors.policeStation && (
-              <p className="text-red-500 text-xs mt-1">
-                {errors.policeStation}
-              </p>
-            )}
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              সম্পূর্ণ ঠিকানা <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.address ? "border-red-500" : ""}`}
-              rows="2"
-              value={customerInfo.address}
-              onChange={(e) =>
-                setCustomerInfo({ ...customerInfo, address: e.target.value })
-              }
-              placeholder="বাড়ির নম্বর, রাস্তা, এলাকা"
-            />
-            {errors.address && (
-              <p className="text-red-500 text-xs mt-1">{errors.address}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ইমেইল (Optional)
-            </label>
-            <input
-              type="email"
-              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400"
-              value={customerInfo.email}
-              onChange={(e) =>
-                setCustomerInfo({ ...customerInfo, email: e.target.value })
-              }
-              placeholder="your@email.com"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Place Order Button */}
-      <div className="mt-6 flex justify-end">
-        <button
-          onClick={handlePlaceOrder}
-          className="bg-[#FDC700] text-[#0E2238] px-8 py-3 rounded-lg font-bold text-lg hover:bg-[#FDC700]/90 transition transform hover:scale-105"
-        >
-          অর্ডার সম্পন্ন করুন
-        </button>
-      </div>
-    </div>
+      <style jsx>{`
+        @keyframes bounce-in {
+          0% {
+            transform: scale(0.3);
+            opacity: 0;
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+        .animate-bounce-in {
+          animation: bounce-in 0.5s ease-out;
+        }
+      `}</style>
+    </>
   );
 };
 
