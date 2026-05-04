@@ -1,8 +1,7 @@
 // app/products/page.jsx
 "use client";
 
-export const dynamic = 'force-dynamic';
-
+import { Suspense } from "react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -375,8 +374,8 @@ const DesktopFilterSidebar = ({
   );
 };
 
-// Main Products Page Component
-const ProductsPage = () => {
+// Main Products Page Content Component (uses useSearchParams)
+const ProductsPageContent = () => {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -844,6 +843,15 @@ const ProductsPage = () => {
         }
       `}</style>
     </div>
+  );
+};
+
+// Main Products Page Component with Suspense boundary
+const ProductsPage = () => {
+  return (
+    <Suspense fallback={<ProductShimmer />}>
+      <ProductsPageContent />
+    </Suspense>
   );
 };
 
