@@ -17,6 +17,7 @@ export async function GET(request, { params }) {
     const products = await Product.find({})
       .skip(skip)
       .limit(perPage)
+      .select('-reviews -description')
       .sort({ createdAt: -1 });
     
     // Get total count for pagination info
