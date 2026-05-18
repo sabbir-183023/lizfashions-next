@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/app/lib/mongodb';
 import Inventory from '@/app/models/Inventory';
+import Category from '@/app/models/Category';
 import { getAuthToken, verifyToken } from '@/app/lib/authUtils';
 import mongoose from 'mongoose';
 
