@@ -13,7 +13,7 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
-import { BrowserMultiFormatReader } from "@zxing/library";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 const InventoryCount = () => {
   const [onlineProducts, setOnlineProducts] = useState([]);
@@ -26,9 +26,9 @@ const InventoryCount = () => {
   const [scannedBarcode, setScannedBarcode] = useState("");
   const [cameraError, setCameraError] = useState(false);
 
-  const videoRef = useRef(null);
+  const html5QrCodeRef = useRef(null);
   const audioRef = useRef(null);
-  const codeReaderRef = useRef(null);
+  const isScanningRef = useRef(false);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -62,8 +62,8 @@ const InventoryCount = () => {
     audioRef.current = audio;
 
     return () => {
-      if (codeReaderRef.current) {
-        codeReaderRef.current.reset();
+      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+        html5QrCodeRef.current.stop().catch(console.error);
       }
     };
   }, []);
@@ -71,9 +71,7 @@ const InventoryCount = () => {
   // Play beep sound
   const playBeep = () => {
     try {
-      const audioContext = new (
-        window.AudioContext || window.webkitAudioContext
-      )();
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
 
@@ -201,9 +199,11 @@ const InventoryCount = () => {
   // Handle barcode scan
   const handleBarcodeScan = useCallback(
     async (barcodeValue) => {
-      if (!barcodeValue || scanning) return;
+      if (!barcodeValue || scanning || isScanningRef.current) return;
 
+      isScanningRef.current = true;
       setScanning(true);
+      
       const product = onlineProducts.find((p) => p.barcode === barcodeValue);
 
       if (product) {
@@ -225,92 +225,93 @@ const InventoryCount = () => {
         setScannedBarcode("");
       }
 
-      setTimeout(() => setScanning(false), 1000);
+      setTimeout(() => {
+        setScanning(false);
+        isScanningRef.current = false;
+      }, 2000);
     },
     [onlineProducts, scanning],
   );
 
-  // Start barcode scanning
+  // Start barcode scanning with Html5Qrcode (AI-powered)
   const startScanning = useCallback(async () => {
     setCameraError(false);
-
+    
     try {
-      // First, try to get camera stream directly to test permissions
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach((track) => track.stop()); // Stop the test stream
-
-      // Try to get video input devices
-      let videoInputDevices = [];
-      try {
-        videoInputDevices =
-          await BrowserMultiFormatReader.listVideoInputDevices();
-      } catch (listError) {
-        console.error("Error listing devices:", listError);
-        // Fallback: try to get devices via mediaDevices.enumerateDevices
-        const allDevices = await navigator.mediaDevices.enumerateDevices();
-        videoInputDevices = allDevices.filter(
-          (device) => device.kind === "videoinput",
-        );
-      }
-
-      if (videoInputDevices.length === 0) {
-        toast.error("No camera found on this device");
-        setCameraError(true);
-        return;
-      }
-
-      // Use the back camera if available, otherwise use first available
-      const selectedDeviceId =
-        videoInputDevices.find(
-          (device) =>
-            device.label?.toLowerCase().includes("back") ||
-            device.label?.toLowerCase().includes("environment"),
-        )?.deviceId || videoInputDevices[0].deviceId;
-
-      // Initialize reader
-      codeReaderRef.current = new BrowserMultiFormatReader();
-
-      // Set a timeout for camera initialization
-      const timeoutId = setTimeout(() => {
-        if (!codeReaderRef.current?.isRunning) {
-          toast.error("Camera initialization timeout");
-          setCameraError(true);
+      // Clean up existing scanner
+      if (html5QrCodeRef.current) {
+        try {
+          await html5QrCodeRef.current.stop();
+        } catch (e) {
+          // Ignore stop errors
         }
-      }, 10000);
+      }
 
-      // Start decoding from video element
-      codeReaderRef.current.decodeFromVideoDevice(
-        selectedDeviceId,
-        "video-preview",
-        (result, err) => {
-          clearTimeout(timeoutId);
-          if (result && !scanning) {
-            const barcode = result.getText();
-            handleBarcodeScan(barcode);
-          }
-          if (err && !(err instanceof Error)) {
-            // No barcode found, continue scanning
-          }
-        },
+      // Create new scanner with enhanced config
+      html5QrCodeRef.current = new Html5Qrcode("video-preview");
+      
+      const config = {
+        fps: 30,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.CODABAR,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.PDF_417,
+          Html5QrcodeSupportedFormats.AZTEC,
+        ],
+      };
+
+      const qrCodeSuccessCallback = (decodedText, decodedResult) => {
+        if (!isScanningRef.current) {
+          handleBarcodeScan(decodedText);
+        }
+      };
+
+      const qrCodeErrorCallback = (errorMessage) => {
+        // Silent fail - continues scanning
+      };
+
+      await html5QrCodeRef.current.start(
+        { facingMode: "environment" },
+        config,
+        qrCodeSuccessCallback,
+        qrCodeErrorCallback
       );
+      
     } catch (error) {
       console.error("Error starting camera:", error);
       if (error.name === "NotAllowedError") {
         toast.error("Camera permission denied. Please allow camera access.");
       } else if (error.name === "NotFoundError") {
         toast.error("No camera found on this device.");
+      } else if (error.message?.includes("Unable to start streaming")) {
+        toast.error("Camera is already in use by another application.");
       } else {
         toast.error("Failed to access camera. Please check permissions.");
       }
       setCameraError(true);
     }
-  }, [handleBarcodeScan, scanning]);
+  }, [handleBarcodeScan]);
 
   // Stop scanning
-  const stopScanning = useCallback(() => {
-    if (codeReaderRef.current) {
-      codeReaderRef.current.reset();
-      codeReaderRef.current = null;
+  const stopScanning = useCallback(async () => {
+    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+      try {
+        await html5QrCodeRef.current.stop();
+      } catch (error) {
+        console.error("Error stopping scanner:", error);
+      }
     }
   }, []);
 
@@ -319,7 +320,7 @@ const InventoryCount = () => {
     if (showCamera) {
       setTimeout(() => {
         startScanning();
-      }, 100);
+      }, 500);
     } else {
       stopScanning();
     }
@@ -515,21 +516,11 @@ const InventoryCount = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
-                        Product
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
-                        Barcode
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
-                        Online Qty
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
-                        Counted
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
-                        Action
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Online Qty</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -537,12 +528,8 @@ const InventoryCount = () => {
                       <tr key={product._id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <div>
-                            <p className="text-sm font-medium text-gray-800">
-                              {product.productName}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {product.categoryName}
-                            </p>
+                            <p className="text-sm font-medium text-gray-800">{product.productName}</p>
+                            <p className="text-xs text-gray-500">{product.categoryName}</p>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono">
@@ -552,21 +539,16 @@ const InventoryCount = () => {
                           {product.currentQty}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span
-                            className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}
-                          >
+                          <span className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}>
                             {product.countedQuantity || 0}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {!product.counted ||
-                          product.countedQuantity < product.currentQty ? (
+                          {!product.counted || product.countedQuantity < product.currentQty ? (
                             <button
                               onClick={() => addToOffline(product, 1)}
                               className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
-                              disabled={
-                                product.countedQuantity >= product.currentQty
-                              }
+                              disabled={product.countedQuantity >= product.currentQty}
                             >
                               + Add to Offline
                             </button>
@@ -580,10 +562,7 @@ const InventoryCount = () => {
                     ))}
                     {filteredOnlineProducts.length === 0 && (
                       <tr>
-                        <td
-                          colSpan="5"
-                          className="text-center py-8 text-gray-500"
-                        >
+                        <td colSpan="5" className="text-center py-8 text-gray-500">
                           No products found
                         </td>
                       </tr>
@@ -598,12 +577,10 @@ const InventoryCount = () => {
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <h3 className="font-semibold text-green-600 flex items-center gap-2">
-                <FaCheckCircle className="text-green-500" /> Offline Counted
-                Products
+                <FaCheckCircle className="text-green-500" /> Offline Counted Products
               </h3>
               <p className="text-xs text-gray-500">
-                Products marked as counted offline ({offlineProducts.length}{" "}
-                items)
+                Products marked as counted offline ({offlineProducts.length} items)
               </p>
             </div>
 
@@ -612,41 +589,24 @@ const InventoryCount = () => {
                 <div className="text-center py-12 text-gray-500">
                   <FaBarcode className="text-4xl mx-auto mb-3 text-gray-300" />
                   <p>No products marked offline yet</p>
-                  <p className="text-xs">
-                    Scan barcodes or add from online table
-                  </p>
+                  <p className="text-xs">Scan barcodes or add from online table</p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
-                        Product
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
-                        Barcode
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
-                        Counted Qty
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
-                        Action
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted Qty</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {offlineProducts.map((product) => (
-                      <tr
-                        key={product._id}
-                        className="bg-green-50 hover:bg-green-100"
-                      >
+                      <tr key={product._id} className="bg-green-50 hover:bg-green-100">
                         <td className="px-4 py-3">
-                          <p className="text-sm font-medium text-gray-800">
-                            {product.productName}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {product.categoryName}
-                          </p>
+                          <p className="text-sm font-medium text-gray-800">{product.productName}</p>
+                          <p className="text-xs text-gray-500">{product.categoryName}</p>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono">
                           {product.barcode || "-"}
@@ -655,19 +615,12 @@ const InventoryCount = () => {
                           <input
                             type="number"
                             value={product.countedQuantity}
-                            onChange={(e) =>
-                              updateOfflineQuantity(
-                                product.barcode,
-                                parseInt(e.target.value) || 0,
-                              )
-                            }
+                            onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
                             min="1"
                             max={product.currentQty}
                             className="w-20 px-2 py-1 text-sm text-center text-gray-700 border border-gray-300 rounded focus:ring-2 focus:ring-yellow-400"
                           />
-                          <span className="text-xs text-gray-500 ml-1">
-                            / {product.currentQty}
-                          </span>
+                          <span className="text-xs text-gray-500 ml-1">/ {product.currentQty}</span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button
@@ -683,10 +636,7 @@ const InventoryCount = () => {
                   </tbody>
                   <tfoot className="bg-gray-50">
                     <tr>
-                      <td
-                        colSpan="3"
-                        className="px-4 py-3 text-gray-600 text-right font-semibold"
-                      >
+                      <td colSpan="3" className="px-4 py-3 text-gray-600 text-right font-semibold">
                         Total Unique Products:
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-green-600">
@@ -701,7 +651,7 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal for Barcode Scanning - Update the video element */}
+      {/* Camera Modal for Barcode Scanning */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
@@ -722,24 +672,16 @@ const InventoryCount = () => {
 
             <div className="p-6">
               <div className="relative bg-black rounded-lg overflow-hidden mb-4">
-                <video
-                  id="video-preview"
+                <div 
+                  id="video-preview" 
                   className="w-full h-auto"
-                  style={{
-                    minHeight: "300px",
-                    maxHeight: "400px",
-                    objectFit: "cover",
-                  }}
-                  playsInline
-                  autoPlay
-                  muted
+                  style={{ minHeight: "300px", maxHeight: "400px" }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
                 </div>
               </div>
 
-              {/* Add a retry button */}
               {cameraError && (
                 <div className="text-center mb-4">
                   <button
@@ -772,7 +714,6 @@ const InventoryCount = () => {
                 </button>
               </div>
 
-              {/* Manual barcode entry remains the same */}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Or enter barcode manually:
