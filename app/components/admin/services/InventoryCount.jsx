@@ -11,6 +11,8 @@ import {
   FaCheckCircle,
   FaSpinner,
   FaTrash,
+  FaPlus,
+  FaMinus,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -25,6 +27,7 @@ const InventoryCount = () => {
   const [scanning, setScanning] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState("");
   const [cameraError, setCameraError] = useState(false);
+  const [lastScannedProduct, setLastScannedProduct] = useState(null);
 
   const html5QrCodeRef = useRef(null);
   const audioRef = useRef(null);
@@ -196,7 +199,7 @@ const InventoryCount = () => {
     );
   };
 
-  // Handle barcode scan
+  // Handle barcode scan - Keep camera open
   const handleBarcodeScan = useCallback(
     async (barcodeValue) => {
       if (!barcodeValue || scanning || isScanningRef.current) return;
@@ -209,31 +212,29 @@ const InventoryCount = () => {
       if (product) {
         if (product.countedQuantity >= product.currentQty) {
           toast.error(`All stock of ${product.productName} has been counted`);
+          setLastScannedProduct(null);
         } else {
           addToOffline(product, 1);
           setScannedBarcode(barcodeValue);
+          setLastScannedProduct(product);
           setTimeout(() => setScannedBarcode(""), 2000);
-
-          // Close modal after successful scan
-          setTimeout(() => {
-            setShowCamera(false);
-            stopScanning();
-          }, 1000);
+          setTimeout(() => setLastScannedProduct(null), 3000);
         }
       } else {
         toast.error(`Product with barcode ${barcodeValue} not found`);
         setScannedBarcode("");
+        setLastScannedProduct(null);
       }
 
       setTimeout(() => {
         setScanning(false);
         isScanningRef.current = false;
-      }, 2000);
+      }, 1500);
     },
     [onlineProducts, scanning],
   );
 
-  // Start barcode scanning with Html5Qrcode (AI-powered)
+  // Start barcode scanning with Html5Qrcode
   const startScanning = useCallback(async () => {
     setCameraError(false);
     
@@ -479,30 +480,21 @@ const InventoryCount = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Online Products Table */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-full">
-            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-              <div>
-                <h3 className="font-semibold text-red-600 flex items-center gap-2">
-                  <FaTimes className="text-red-500" /> Online Products
-                </h3>
-                <p className="text-xs text-gray-500">
-                  Products from inventory that need counting
-                </p>
-              </div>
-              <div className="relative w-64">
-                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
-                <input
-                  type="text"
-                  placeholder="Search by name or barcode..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-10 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
-                />
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="font-semibold text-red-600 flex items-center gap-2">
+                    <FaTimes className="text-red-500" /> Online Products
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Products from inventory that need counting
+                  </p>
+                </div>
                 <button
                   onClick={() => setShowCamera(true)}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-blue-600"
-                  title="Scan Barcode"
+                  className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2"
                 >
-                  <FaCamera className="text-sm" />
+                  <FaCamera /> Scan Barcode
                 </button>
               </div>
             </div>
@@ -513,62 +505,76 @@ const InventoryCount = () => {
                   <FaSpinner className="animate-spin text-3xl text-yellow-500" />
                 </div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Online Qty</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {filteredOnlineProducts.map((product) => (
-                      <tr key={product._id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                            <p className="text-xs text-gray-500">{product.categoryName}</p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                          {product.barcode || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
-                          {product.currentQty}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}>
-                            {product.countedQuantity || 0}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {!product.counted || product.countedQuantity < product.currentQty ? (
-                            <button
-                              onClick={() => addToOffline(product, 1)}
-                              className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
-                              disabled={product.countedQuantity >= product.currentQty}
-                            >
-                              + Add to Offline
-                            </button>
-                          ) : (
-                            <span className="text-green-600 text-xs flex items-center gap-1">
-                              <FaCheckCircle /> Complete
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredOnlineProducts.length === 0 && (
+                <div className="relative">
+                  <div className="sticky top-0 bg-white p-2 border-b">
+                    <div className="relative">
+                      <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
+                      <input
+                        type="text"
+                        placeholder="Search by name or barcode..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                      />
+                    </div>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
                       <tr>
-                        <td colSpan="5" className="text-center py-8 text-gray-500">
-                          No products found
-                        </td>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Online Qty</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {filteredOnlineProducts.map((product) => (
+                        <tr key={product._id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">{product.productName}</p>
+                              <p className="text-xs text-gray-500">{product.categoryName}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-500 font-mono">
+                            {product.barcode || "-"}
+                          </td>
+                          <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
+                            {product.currentQty}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}>
+                              {product.countedQuantity || 0}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {!product.counted || product.countedQuantity < product.currentQty ? (
+                              <button
+                                onClick={() => addToOffline(product, 1)}
+                                className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
+                                disabled={product.countedQuantity >= product.currentQty}
+                              >
+                                + Add
+                              </button>
+                            ) : (
+                              <span className="text-green-600 text-xs flex items-center gap-1">
+                                <FaCheckCircle /> Complete
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredOnlineProducts.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="text-center py-8 text-gray-500">
+                            No products found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
@@ -612,15 +618,31 @@ const InventoryCount = () => {
                           {product.barcode || "-"}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <input
-                            type="number"
-                            value={product.countedQuantity}
-                            onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
-                            min="1"
-                            max={product.currentQty}
-                            className="w-20 px-2 py-1 text-sm text-center text-gray-700 border border-gray-300 rounded focus:ring-2 focus:ring-yellow-400"
-                          />
-                          <span className="text-xs text-gray-500 ml-1">/ {product.currentQty}</span>
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity - 1)}
+                              className="text-gray-500 hover:text-red-500"
+                              disabled={product.countedQuantity <= 1}
+                            >
+                              <FaMinus className="text-xs" />
+                            </button>
+                            <input
+                              type="number"
+                              value={product.countedQuantity}
+                              onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
+                              min="1"
+                              max={product.currentQty}
+                              className="w-16 px-2 py-1 text-sm text-center text-gray-700 border border-gray-300 rounded focus:ring-2 focus:ring-yellow-400"
+                            />
+                            <button
+                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity + 1)}
+                              className="text-gray-500 hover:text-green-500"
+                              disabled={product.countedQuantity >= product.currentQty}
+                            >
+                              <FaPlus className="text-xs" />
+                            </button>
+                            <span className="text-xs text-gray-500 ml-1">/ {product.currentQty}</span>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button
@@ -651,10 +673,10 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal for Barcode Scanning */}
+      {/* Camera Modal - Camera on top, scrollable content below */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="sticky top-0 bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4 flex justify-between items-center">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <FaCamera /> Scan Barcode
@@ -670,91 +692,152 @@ const InventoryCount = () => {
               </button>
             </div>
 
-            <div className="p-6">
-              <div className="relative bg-black rounded-lg overflow-hidden mb-4">
-                <div 
-                  id="video-preview" 
-                  className="w-full h-auto"
-                  style={{ minHeight: "300px", maxHeight: "400px" }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
-                </div>
-              </div>
-
-              {cameraError && (
-                <div className="text-center mb-4">
-                  <button
-                    onClick={() => {
-                      setCameraError(false);
-                      startScanning();
-                    }}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                  >
-                    Retry Camera
-                  </button>
-                </div>
-              )}
-
-              {!cameraError && (
-                <div className="text-center text-sm text-gray-500 mb-4">
-                  Position the barcode in the center of the frame
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowCamera(false);
-                    stopScanning();
-                  }}
-                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Or enter barcode manually:
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    id="manual-barcode"
-                    placeholder="Enter barcode number"
-                    className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter") {
-                        handleBarcodeScan(e.target.value);
-                        e.target.value = "";
-                        setShowCamera(false);
-                        stopScanning();
-                      }
-                    }}
+            <div className="flex-1 overflow-y-auto">
+              {/* Camera Section - Fixed at top */}
+              <div className="sticky top-0 bg-black z-10">
+                <div className="relative bg-black">
+                  <div 
+                    id="video-preview" 
+                    className="w-full h-auto"
+                    style={{ minHeight: "300px", maxHeight: "350px", objectFit: "cover" }}
                   />
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById("manual-barcode");
-                      if (input.value) {
-                        handleBarcodeScan(input.value);
-                        input.value = "";
-                        setShowCamera(false);
-                        stopScanning();
-                      }
-                    }}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-                  >
-                    Add
-                  </button>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
+                  </div>
                 </div>
+
+                {cameraError && (
+                  <div className="text-center p-4">
+                    <button
+                      onClick={() => {
+                        setCameraError(false);
+                        startScanning();
+                      }}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                    >
+                      Retry Camera
+                    </button>
+                  </div>
+                )}
+
+                {!cameraError && (
+                  <div className="text-center text-sm text-gray-600 py-2 bg-gray-100">
+                    Position the barcode in the center of the frame
+                  </div>
+                )}
               </div>
 
-              {scannedBarcode && (
-                <div className="mt-4 p-3 bg-green-100 text-green-700 rounded-lg text-center animate-bounce">
-                  ✅ Product added: {scannedBarcode}
+              {/* Recently Scanned Product */}
+              {lastScannedProduct && (
+                <div className="m-4 p-3 bg-green-100 border border-green-300 rounded-lg animate-bounce">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-green-800">✅ Recently Scanned</p>
+                      <p className="text-sm text-green-700">{lastScannedProduct.productName}</p>
+                      <p className="text-xs text-green-600">Barcode: {lastScannedProduct.barcode}</p>
+                    </div>
+                    <span className="text-green-600 text-2xl">✓</span>
+                  </div>
                 </div>
               )}
+
+              {/* Offline Products List - Scrollable */}
+              <div className="p-4">
+                <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <FaCheckCircle className="text-green-500" /> Counted Products ({offlineProducts.length})
+                </h3>
+                
+                {offlineProducts.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg">
+                    <FaBarcode className="text-4xl mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No products counted yet</p>
+                    <p className="text-xs">Scan barcodes to add products</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {offlineProducts.map((product) => (
+                      <div key={product._id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-800">{product.productName}</p>
+                          <p className="text-xs text-gray-500 font-mono">{product.barcode}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity - 1)}
+                              className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
+                              disabled={product.countedQuantity <= 1}
+                            >
+                              <FaMinus className="text-xs" />
+                            </button>
+                            <span className="w-10 text-center font-semibold text-gray-800">{product.countedQuantity}</span>
+                            <button
+                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity + 1)}
+                              className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
+                              disabled={product.countedQuantity >= product.currentQty}
+                            >
+                              <FaPlus className="text-xs" />
+                            </button>
+                          </div>
+                          <span className="text-xs text-gray-500">/ {product.currentQty}</span>
+                          <button
+                            onClick={() => removeFromOffline(product.barcode)}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <FaTrash className="text-sm" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Manual Barcode Entry */}
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Or enter barcode manually:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      id="manual-barcode"
+                      placeholder="Enter barcode number"
+                      className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                      onKeyPress={(e) => {
+                        if (e.key === "Enter") {
+                          handleBarcodeScan(e.target.value);
+                          e.target.value = "";
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const input = document.getElementById("manual-barcode");
+                        if (input.value) {
+                          handleBarcodeScan(input.value);
+                          input.value = "";
+                        }
+                      }}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowCamera(false);
+                  stopScanning();
+                }}
+                className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
+              >
+                Close Scanner
+              </button>
             </div>
           </div>
         </div>
