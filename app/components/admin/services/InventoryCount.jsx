@@ -13,9 +13,8 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
-import Image from "next/image";
 import Webcam from "react-webcam";
-import jsBarcode from "jsbarcode";
+import { BrowserMultiFormatReader } from "@zxing/library";
 
 const InventoryCount = () => {
   const [onlineProducts, setOnlineProducts] = useState([]);
@@ -26,9 +25,11 @@ const InventoryCount = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState("");
-  
+
   const webcamRef = useRef(null);
   const audioRef = useRef(null);
+  const codeReaderRef = useRef(null);
+  const scanIntervalRef = useRef(null);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -37,7 +38,7 @@ const InventoryCount = () => {
       const response = await fetch("/api/v1/admin/inventory");
       const data = await response.json();
       if (data.success) {
-        const products = data.inventory.map(item => ({
+        const products = data.inventory.map((item) => ({
           ...item,
           counted: false,
           countedQuantity: 0,
@@ -60,44 +61,81 @@ const InventoryCount = () => {
     // Create beep audio element
     const audio = new Audio("/beep.mp3");
     audioRef.current = audio;
+
+    // Initialize barcode reader
+    codeReaderRef.current = new BrowserMultiFormatReader();
+
+    return () => {
+      // Clean up
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+      }
+      if (codeReaderRef.current) {
+        codeReaderRef.current.reset();
+      }
+    };
   }, []);
+
+  // Play beep sound
+  const playBeep = () => {
+    try {
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = 880;
+      gainNode.gain.value = 0.3;
+
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+        audioContext.close();
+      }, 200);
+    } catch (e) {
+      console.log("Audio not supported");
+    }
+  };
 
   // Filter products based on search
   useEffect(() => {
     const filtered = onlineProducts.filter(
       (product) =>
         product.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
+        product.barcode?.toLowerCase().includes(searchTerm.toLowerCase()),
     );
     setFilteredOnlineProducts(filtered);
   }, [searchTerm, onlineProducts]);
 
   // Add product to offline list
   const addToOffline = (product, quantity = 1) => {
-    // Check if product already exists in offline list
-    const existingOffline = offlineProducts.find(p => p.barcode === product.barcode);
-    
+    const existingOffline = offlineProducts.find(
+      (p) => p.barcode === product.barcode,
+    );
+
     if (existingOffline) {
-      // Update existing offline product quantity
       const newQuantity = existingOffline.countedQuantity + quantity;
       if (newQuantity > product.currentQty) {
         toast.error(`Cannot exceed available stock (${product.currentQty})`);
-        return;
+        return false;
       }
-      setOfflineProducts(prev =>
-        prev.map(p =>
+      setOfflineProducts((prev) =>
+        prev.map((p) =>
           p.barcode === product.barcode
             ? { ...p, countedQuantity: newQuantity }
-            : p
-        )
+            : p,
+        ),
       );
     } else {
-      // Add new offline product
       if (quantity > product.currentQty) {
         toast.error(`Cannot exceed available stock (${product.currentQty})`);
-        return;
+        return false;
       }
-      setOfflineProducts(prev => [
+      setOfflineProducts((prev) => [
         ...prev,
         {
           ...product,
@@ -106,34 +144,34 @@ const InventoryCount = () => {
       ]);
     }
 
-    // Update online product count status
-    setOnlineProducts(prev =>
-      prev.map(p =>
+    setOnlineProducts((prev) =>
+      prev.map((p) =>
         p.barcode === product.barcode
-          ? { ...p, counted: true, countedQuantity: (p.countedQuantity || 0) + quantity }
-          : p
-      )
+          ? {
+              ...p,
+              counted: true,
+              countedQuantity: (p.countedQuantity || 0) + quantity,
+            }
+          : p,
+      ),
     );
 
-    // Play beep sound
-    if (audioRef.current) {
-      audioRef.current.play().catch(e => console.log("Audio play failed:", e));
-    }
-
+    playBeep();
     toast.success(`${product.productName} added to offline count`);
+    return true;
   };
 
   // Remove from offline list
   const removeFromOffline = (barcode) => {
-    const product = offlineProducts.find(p => p.barcode === barcode);
+    const product = offlineProducts.find((p) => p.barcode === barcode);
     if (product) {
-      setOfflineProducts(prev => prev.filter(p => p.barcode !== barcode));
-      setOnlineProducts(prev =>
-        prev.map(p =>
+      setOfflineProducts((prev) => prev.filter((p) => p.barcode !== barcode));
+      setOnlineProducts((prev) =>
+        prev.map((p) =>
           p.barcode === barcode
             ? { ...p, counted: false, countedQuantity: 0 }
-            : p
-        )
+            : p,
+        ),
       );
       toast.success(`${product.productName} removed from offline count`);
     }
@@ -141,97 +179,132 @@ const InventoryCount = () => {
 
   // Update offline product quantity
   const updateOfflineQuantity = (barcode, newQuantity) => {
-    const product = offlineProducts.find(p => p.barcode === barcode);
-    const onlineProduct = onlineProducts.find(p => p.barcode === barcode);
-    
+    const onlineProduct = onlineProducts.find((p) => p.barcode === barcode);
+
     if (newQuantity < 1) {
       removeFromOffline(barcode);
       return;
     }
-    
+
     if (newQuantity > onlineProduct.currentQty) {
-      toast.error(`Cannot exceed available stock (${onlineProduct.currentQty})`);
+      toast.error(
+        `Cannot exceed available stock (${onlineProduct.currentQty})`,
+      );
       return;
     }
-    
-    setOfflineProducts(prev =>
-      prev.map(p =>
-        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p
-      )
+
+    setOfflineProducts((prev) =>
+      prev.map((p) =>
+        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
+      ),
     );
-    
-    setOnlineProducts(prev =>
-      prev.map(p =>
-        p.barcode === barcode
-          ? { ...p, countedQuantity: newQuantity }
-          : p
-      )
+
+    setOnlineProducts((prev) =>
+      prev.map((p) =>
+        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
+      ),
     );
   };
 
-  // Handle barcode scan from camera
-  const handleBarcodeScan = useCallback((barcode) => {
-    if (!barcode || scanning) return;
-    
-    setScanning(true);
-    const product = onlineProducts.find(p => p.barcode === barcode);
-    
-    if (product) {
-      if (product.countedQuantity >= product.currentQty) {
-        toast.error(`All stock of ${product.productName} has been counted`);
+  // Handle barcode scan
+  const handleBarcodeScan = useCallback(
+    async (barcodeValue) => {
+      if (!barcodeValue || scanning) return;
+
+      setScanning(true);
+      const product = onlineProducts.find((p) => p.barcode === barcodeValue);
+
+      if (product) {
+        if (product.countedQuantity >= product.currentQty) {
+          toast.error(`All stock of ${product.productName} has been counted`);
+        } else {
+          addToOffline(product, 1);
+          setScannedBarcode(barcodeValue);
+          setTimeout(() => setScannedBarcode(""), 2000);
+
+          // Close modal after successful scan
+          setTimeout(() => {
+            setShowCamera(false);
+            // Stop scanning when modal closes
+            if (scanIntervalRef.current) {
+              clearInterval(scanIntervalRef.current);
+            }
+          }, 500);
+        }
       } else {
-        addToOffline(product, 1);
+        toast.error(`Product with barcode ${barcodeValue} not found`);
+        setScannedBarcode("");
       }
-      setScannedBarcode(barcode);
-      setTimeout(() => setScannedBarcode(""), 1000);
+
+      setTimeout(() => setScanning(false), 1000);
+    },
+    [onlineProducts, scanning],
+  );
+
+  // Start continuous barcode scanning
+  const startContinuousScan = useCallback(async () => {
+    if (!webcamRef.current || !codeReaderRef.current) return;
+
+    const videoInputDevices =
+      await codeReaderRef.current.listVideoInputDevices();
+    const selectedDeviceId = videoInputDevices[0]?.deviceId;
+
+    if (!selectedDeviceId) {
+      toast.error("No camera found");
+      return;
+    }
+
+    // Decode continuously from the video stream
+    codeReaderRef.current.decodeFromVideoDevice(
+      selectedDeviceId,
+      "video",
+      (result, err) => {
+        if (result && !scanning) {
+          const barcode = result.getText();
+          handleBarcodeScan(barcode);
+        }
+        if (err && !(err instanceof Error)) {
+          // No barcode found, continue scanning
+        }
+      },
+    );
+  }, [handleBarcodeScan, scanning]);
+
+  // Stop scanning
+  const stopScanning = useCallback(() => {
+    if (codeReaderRef.current) {
+      codeReaderRef.current.reset();
+    }
+  }, []);
+
+  // Start scanning when modal opens
+  useEffect(() => {
+    if (showCamera) {
+      setTimeout(() => {
+        startContinuousScan();
+      }, 500);
     } else {
-      toast.error(`Product with barcode ${barcode} not found`);
+      stopScanning();
     }
-    
-    setTimeout(() => setScanning(false), 1000);
-  }, [onlineProducts]);
 
-  // Process video frames for barcode detection
-  const capture = useCallback(() => {
-    if (!webcamRef.current) return;
-    
-    const imageSrc = webcamRef.current.getScreenshot();
-    if (!imageSrc) return;
-    
-    // Here you would typically use a barcode detection library
-    // For now, we'll use a simple approach with input field
-    // You can integrate a proper barcode scanner library like @zxing/library
-    const barcode = prompt("Enter barcode number (or scan with external scanner):");
-    if (barcode) {
-      handleBarcodeScan(barcode);
-    }
-  }, [handleBarcodeScan]);
+    return () => {
+      stopScanning();
+    };
+  }, [showCamera, startContinuousScan, stopScanning]);
 
-  // Start continuous scanning
-  const startScanning = () => {
-    // For continuous scanning, you would set up an interval to capture frames
-    // This is a simplified version - for production, use a proper barcode scanner library
-    const interval = setInterval(() => {
-      if (webcamRef.current && !scanning) {
-        // Capture and process frame
-        capture();
-      }
-    }, 500);
-    
-    return () => clearInterval(interval);
-  };
-
-  // Print missing products (online but not offline)
+  // Print missing products
   const handlePrintMissing = () => {
-    const missingProducts = onlineProducts.filter(p => !p.counted || p.countedQuantity < p.currentQty);
-    
+    const missingProducts = onlineProducts.filter(
+      (p) => !p.counted || p.countedQuantity < p.currentQty,
+    );
+
     if (missingProducts.length === 0) {
       toast.success("All products have been counted!");
       return;
     }
-    
+
     const printWindow = window.open("", "_blank");
-    
+
     const printHTML = `
       <!DOCTYPE html>
       <html>
@@ -302,23 +375,27 @@ const InventoryCount = () => {
               </tr>
             </thead>
             <tbody>
-              ${missingProducts.map((product, idx) => `
+              ${missingProducts
+                .map(
+                  (product, idx) => `
                 <tr>
                   <td>${idx + 1}</td>
                   <td>${product.productName}</td>
-                  <td>${product.barcode || '-'}</td>
+                  <td>${product.barcode || "-"}</td>
                   <td>${product.categoryName}</td>
                   <td class="text-right">${product.currentQty}</td>
                   <td class="text-right">${product.countedQuantity || 0}</td>
                   <td class="text-right missing-badge">${product.currentQty - (product.countedQuantity || 0)}</td>
                 </tr>
-              `).join('')}
+              `,
+                )
+                .join("")}
             </tbody>
             <tfoot>
               <tr class="missing-badge">
                 <td colspan="6" class="text-right"><strong>Total Missing Products:</strong></td>
                 <td class="text-right"><strong>${missingProducts.length}</strong></td>
-               </tr>
+              </tr>
             </tfoot>
           </table>
           
@@ -333,31 +410,13 @@ const InventoryCount = () => {
         </body>
       </html>
     `;
-    
+
     printWindow.document.write(printHTML);
     printWindow.document.close();
   };
 
-  // Generate barcode image for offline products (optional)
-  const generateBarcodeImage = (barcode) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 200;
-    canvas.height = 60;
-    
-    jsBarcode(canvas, barcode, {
-      format: "CODE128",
-      width: 1.5,
-      height: 40,
-      displayValue: true,
-      fontSize: 12,
-      margin: 5,
-    });
-    
-    return canvas.toDataURL("image/png");
-  };
-
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(150vh)] md:h-[calc(120vh)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(100vh-120px)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -398,7 +457,7 @@ const InventoryCount = () => {
                   placeholder="Search by name or barcode..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                  className="w-full pl-9 pr-10 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                 />
                 <button
                   onClick={() => setShowCamera(true)}
@@ -409,7 +468,7 @@ const InventoryCount = () => {
                 </button>
               </div>
             </div>
-            
+
             <div className="overflow-x-auto flex-1">
               {loading ? (
                 <div className="flex justify-center items-center py-12">
@@ -419,11 +478,21 @@ const InventoryCount = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Online Qty</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                        Product
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                        Barcode
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                        Online Qty
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                        Counted
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -431,27 +500,36 @@ const InventoryCount = () => {
                       <tr key={product._id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                            <p className="text-xs text-gray-500">{product.categoryName}</p>
+                            <p className="text-sm font-medium text-gray-800">
+                              {product.productName}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {product.categoryName}
+                            </p>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                          {product.barcode || '-'}
+                          {product.barcode || "-"}
                         </td>
                         <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
                           {product.currentQty}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`text-sm font-semibold ${product.counted ? 'text-green-600' : 'text-red-500'}`}>
+                          <span
+                            className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}
+                          >
                             {product.countedQuantity || 0}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {!product.counted || product.countedQuantity < product.currentQty ? (
+                          {!product.counted ||
+                          product.countedQuantity < product.currentQty ? (
                             <button
                               onClick={() => addToOffline(product, 1)}
-                              className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
-                              disabled={product.countedQuantity >= product.currentQty}
+                              className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
+                              disabled={
+                                product.countedQuantity >= product.currentQty
+                              }
                             >
                               + Add to Offline
                             </button>
@@ -465,7 +543,10 @@ const InventoryCount = () => {
                     ))}
                     {filteredOnlineProducts.length === 0 && (
                       <tr>
-                        <td colSpan="5" className="text-center py-8 text-gray-500">
+                        <td
+                          colSpan="5"
+                          className="text-center py-8 text-gray-500"
+                        >
                           No products found
                         </td>
                       </tr>
@@ -480,50 +561,76 @@ const InventoryCount = () => {
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <h3 className="font-semibold text-green-600 flex items-center gap-2">
-                <FaCheckCircle className="text-green-500" /> Offline Counted Products
+                <FaCheckCircle className="text-green-500" /> Offline Counted
+                Products
               </h3>
               <p className="text-xs text-gray-500">
-                Products marked as counted offline ({offlineProducts.length} items)
+                Products marked as counted offline ({offlineProducts.length}{" "}
+                items)
               </p>
             </div>
-            
+
             <div className="overflow-x-auto flex-1">
               {offlineProducts.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <FaBarcode className="text-4xl mx-auto mb-3 text-gray-300" />
                   <p>No products marked offline yet</p>
-                  <p className="text-xs">Scan barcodes or add from online table</p>
+                  <p className="text-xs">
+                    Scan barcodes or add from online table
+                  </p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted Qty</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                        Product
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                        Barcode
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                        Counted Qty
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {offlineProducts.map((product) => (
-                      <tr key={product._id} className="bg-green-50 hover:bg-green-100">
+                      <tr
+                        key={product._id}
+                        className="bg-green-50 hover:bg-green-100"
+                      >
                         <td className="px-4 py-3">
-                          <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                          <p className="text-xs text-gray-500">{product.categoryName}</p>
+                          <p className="text-sm font-medium text-gray-800">
+                            {product.productName}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {product.categoryName}
+                          </p>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                          {product.barcode || '-'}
+                          {product.barcode || "-"}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <input
                             type="number"
                             value={product.countedQuantity}
-                            onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
+                            onChange={(e) =>
+                              updateOfflineQuantity(
+                                product.barcode,
+                                parseInt(e.target.value) || 0,
+                              )
+                            }
                             min="1"
                             max={product.currentQty}
                             className="w-20 px-2 py-1 text-sm text-center text-gray-700 border border-gray-300 rounded focus:ring-2 focus:ring-yellow-400"
                           />
-                          <span className="text-xs text-gray-500 ml-1">/ {product.currentQty}</span>
+                          <span className="text-xs text-gray-500 ml-1">
+                            / {product.currentQty}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button
@@ -539,7 +646,10 @@ const InventoryCount = () => {
                   </tbody>
                   <tfoot className="bg-gray-50">
                     <tr>
-                      <td colSpan="3" className="px-4 py-3 text-gray-600 text-right font-semibold">
+                      <td
+                        colSpan="3"
+                        className="px-4 py-3 text-gray-600 text-right font-semibold"
+                      >
                         Total Unique Products:
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-green-600">
@@ -563,44 +673,44 @@ const InventoryCount = () => {
                 <FaCamera /> Scan Barcode
               </h2>
               <button
-                onClick={() => setShowCamera(false)}
+                onClick={() => {
+                  setShowCamera(false);
+                  stopScanning();
+                }}
                 className="text-white hover:text-gray-200"
               >
                 <FaTimes className="text-xl" />
               </button>
             </div>
-            
+
             <div className="p-6">
               <div className="relative bg-black rounded-lg overflow-hidden mb-4">
-                <Webcam
-                  ref={webcamRef}
-                  audio={false}
-                  screenshotFormat="image/jpeg"
-                  videoConstraints={{
-                    facingMode: "environment"
-                  }}
+                <video
+                  id="video"
                   className="w-full h-auto"
+                  style={{ minHeight: "300px", objectFit: "cover" }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg"></div>
+                  <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
                 </div>
               </div>
-              
+
+              <div className="text-center text-sm text-gray-500 mb-4">
+                Position the barcode in the center of the frame
+              </div>
+
               <div className="flex gap-3">
                 <button
-                  onClick={capture}
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <FaCamera /> Capture & Scan
-                </button>
-                <button
-                  onClick={() => setShowCamera(false)}
+                  onClick={() => {
+                    setShowCamera(false);
+                    stopScanning();
+                  }}
                   className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 transition-colors"
                 >
                   Cancel
                 </button>
               </div>
-              
+
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Or enter barcode manually:
@@ -608,23 +718,26 @@ const InventoryCount = () => {
                 <div className="flex gap-2">
                   <input
                     type="text"
+                    id="manual-barcode"
                     placeholder="Enter barcode number"
                     className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                     onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === "Enter") {
                         handleBarcodeScan(e.target.value);
-                        e.target.value = '';
+                        e.target.value = "";
                         setShowCamera(false);
+                        stopScanning();
                       }
                     }}
                   />
                   <button
-                    onClick={(e) => {
-                      const input = e.target.previousSibling;
+                    onClick={() => {
+                      const input = document.getElementById("manual-barcode");
                       if (input.value) {
                         handleBarcodeScan(input.value);
-                        input.value = '';
+                        input.value = "";
                         setShowCamera(false);
+                        stopScanning();
                       }
                     }}
                     className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
@@ -633,9 +746,9 @@ const InventoryCount = () => {
                   </button>
                 </div>
               </div>
-              
+
               {scannedBarcode && (
-                <div className="mt-4 p-3 bg-green-100 text-green-700 rounded-lg text-center">
+                <div className="mt-4 p-3 bg-green-100 text-green-700 rounded-lg text-center animate-bounce">
                   ✅ Product added: {scannedBarcode}
                 </div>
               )}
