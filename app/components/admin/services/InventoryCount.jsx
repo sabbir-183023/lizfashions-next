@@ -13,7 +13,6 @@ import {
   FaTrash,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
-import Webcam from "react-webcam";
 import { BrowserMultiFormatReader } from "@zxing/library";
 
 const InventoryCount = () => {
@@ -25,11 +24,11 @@ const InventoryCount = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState("");
+  const [cameraError, setCameraError] = useState(false);
 
-  const webcamRef = useRef(null);
+  const videoRef = useRef(null);
   const audioRef = useRef(null);
   const codeReaderRef = useRef(null);
-  const scanIntervalRef = useRef(null);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -62,14 +61,7 @@ const InventoryCount = () => {
     const audio = new Audio("/beep.mp3");
     audioRef.current = audio;
 
-    // Initialize barcode reader
-    codeReaderRef.current = new BrowserMultiFormatReader();
-
     return () => {
-      // Clean up
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-      }
       if (codeReaderRef.current) {
         codeReaderRef.current.reset();
       }
@@ -225,11 +217,8 @@ const InventoryCount = () => {
           // Close modal after successful scan
           setTimeout(() => {
             setShowCamera(false);
-            // Stop scanning when modal closes
-            if (scanIntervalRef.current) {
-              clearInterval(scanIntervalRef.current);
-            }
-          }, 500);
+            stopScanning();
+          }, 1000);
         }
       } else {
         toast.error(`Product with barcode ${barcodeValue} not found`);
@@ -241,39 +230,87 @@ const InventoryCount = () => {
     [onlineProducts, scanning],
   );
 
-  // Start continuous barcode scanning
-  const startContinuousScan = useCallback(async () => {
-    if (!webcamRef.current || !codeReaderRef.current) return;
+  // Start barcode scanning
+  const startScanning = useCallback(async () => {
+    setCameraError(false);
 
-    const videoInputDevices =
-      await codeReaderRef.current.listVideoInputDevices();
-    const selectedDeviceId = videoInputDevices[0]?.deviceId;
+    try {
+      // First, try to get camera stream directly to test permissions
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((track) => track.stop()); // Stop the test stream
 
-    if (!selectedDeviceId) {
-      toast.error("No camera found");
-      return;
+      // Try to get video input devices
+      let videoInputDevices = [];
+      try {
+        videoInputDevices =
+          await BrowserMultiFormatReader.listVideoInputDevices();
+      } catch (listError) {
+        console.error("Error listing devices:", listError);
+        // Fallback: try to get devices via mediaDevices.enumerateDevices
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        videoInputDevices = allDevices.filter(
+          (device) => device.kind === "videoinput",
+        );
+      }
+
+      if (videoInputDevices.length === 0) {
+        toast.error("No camera found on this device");
+        setCameraError(true);
+        return;
+      }
+
+      // Use the back camera if available, otherwise use first available
+      const selectedDeviceId =
+        videoInputDevices.find(
+          (device) =>
+            device.label?.toLowerCase().includes("back") ||
+            device.label?.toLowerCase().includes("environment"),
+        )?.deviceId || videoInputDevices[0].deviceId;
+
+      // Initialize reader
+      codeReaderRef.current = new BrowserMultiFormatReader();
+
+      // Set a timeout for camera initialization
+      const timeoutId = setTimeout(() => {
+        if (!codeReaderRef.current?.isRunning) {
+          toast.error("Camera initialization timeout");
+          setCameraError(true);
+        }
+      }, 10000);
+
+      // Start decoding from video element
+      codeReaderRef.current.decodeFromVideoDevice(
+        selectedDeviceId,
+        "video-preview",
+        (result, err) => {
+          clearTimeout(timeoutId);
+          if (result && !scanning) {
+            const barcode = result.getText();
+            handleBarcodeScan(barcode);
+          }
+          if (err && !(err instanceof Error)) {
+            // No barcode found, continue scanning
+          }
+        },
+      );
+    } catch (error) {
+      console.error("Error starting camera:", error);
+      if (error.name === "NotAllowedError") {
+        toast.error("Camera permission denied. Please allow camera access.");
+      } else if (error.name === "NotFoundError") {
+        toast.error("No camera found on this device.");
+      } else {
+        toast.error("Failed to access camera. Please check permissions.");
+      }
+      setCameraError(true);
     }
-
-    // Decode continuously from the video stream
-    codeReaderRef.current.decodeFromVideoDevice(
-      selectedDeviceId,
-      "video",
-      (result, err) => {
-        if (result && !scanning) {
-          const barcode = result.getText();
-          handleBarcodeScan(barcode);
-        }
-        if (err && !(err instanceof Error)) {
-          // No barcode found, continue scanning
-        }
-      },
-    );
   }, [handleBarcodeScan, scanning]);
 
   // Stop scanning
   const stopScanning = useCallback(() => {
     if (codeReaderRef.current) {
       codeReaderRef.current.reset();
+      codeReaderRef.current = null;
     }
   }, []);
 
@@ -281,8 +318,8 @@ const InventoryCount = () => {
   useEffect(() => {
     if (showCamera) {
       setTimeout(() => {
-        startContinuousScan();
-      }, 500);
+        startScanning();
+      }, 100);
     } else {
       stopScanning();
     }
@@ -290,7 +327,7 @@ const InventoryCount = () => {
     return () => {
       stopScanning();
     };
-  }, [showCamera, startContinuousScan, stopScanning]);
+  }, [showCamera, startScanning, stopScanning]);
 
   // Print missing products
   const handlePrintMissing = () => {
@@ -664,7 +701,7 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal for Barcode Scanning */}
+      {/* Camera Modal for Barcode Scanning - Update the video element */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
@@ -686,18 +723,42 @@ const InventoryCount = () => {
             <div className="p-6">
               <div className="relative bg-black rounded-lg overflow-hidden mb-4">
                 <video
-                  id="video"
+                  id="video-preview"
                   className="w-full h-auto"
-                  style={{ minHeight: "300px", objectFit: "cover" }}
+                  style={{
+                    minHeight: "300px",
+                    maxHeight: "400px",
+                    objectFit: "cover",
+                  }}
+                  playsInline
+                  autoPlay
+                  muted
                 />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
                 </div>
               </div>
 
-              <div className="text-center text-sm text-gray-500 mb-4">
-                Position the barcode in the center of the frame
-              </div>
+              {/* Add a retry button */}
+              {cameraError && (
+                <div className="text-center mb-4">
+                  <button
+                    onClick={() => {
+                      setCameraError(false);
+                      startScanning();
+                    }}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  >
+                    Retry Camera
+                  </button>
+                </div>
+              )}
+
+              {!cameraError && (
+                <div className="text-center text-sm text-gray-500 mb-4">
+                  Position the barcode in the center of the frame
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <button
@@ -711,6 +772,7 @@ const InventoryCount = () => {
                 </button>
               </div>
 
+              {/* Manual barcode entry remains the same */}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Or enter barcode manually:
