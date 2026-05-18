@@ -82,7 +82,7 @@ const Menu = ({ activeTab, setActiveTab, setMobileMenuOpen }) => {
       </div>
 
       {/* Navigation Menu - Scrollable */}
-      <nav className="flex-1 overflow-y-auto min-h-0 p-4">
+      <nav className="flex-1 overflow-y-auto min-h-0 p-4 bg-blue-800">
         <ul className="space-y-2">
           {menuItems.map((item) => (
             <li key={item.id}>
@@ -93,7 +93,7 @@ const Menu = ({ activeTab, setActiveTab, setMobileMenuOpen }) => {
                   transition-all duration-200
                   ${activeTab === item.id 
                     ? "bg-yellow-400 text-blue-900 shadow-lg" 
-                    : "text-gray-300 hover:bg-blue-800 hover:text-white"
+                    : "text-gray-300 hover:bg-blue-900 hover:text-white"
                   }
                 `}
               >
