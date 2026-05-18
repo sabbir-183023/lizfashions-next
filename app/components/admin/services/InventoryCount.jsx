@@ -455,7 +455,7 @@ const InventoryCount = () => {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(100vh-120px)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(150vh)] md:h-[calc(120vh)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -476,10 +476,10 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+      <div className="block md:flex-1 p-4 sm:p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Online Products Table */}
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-full">
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-[60vh] md:h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <div className="flex justify-between items-center">
                 <div>
@@ -499,7 +499,7 @@ const InventoryCount = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto flex-1">
+            <div className="overflow-x-auto overflow-y-auto flex-1">
               {loading ? (
                 <div className="flex justify-center items-center py-12">
                   <FaSpinner className="animate-spin text-3xl text-yellow-500" />
@@ -580,7 +580,7 @@ const InventoryCount = () => {
           </div>
 
           {/* Offline Products Table */}
-          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-full">
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-[50vh] md:h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <h3 className="font-semibold text-green-600 flex items-center gap-2">
                 <FaCheckCircle className="text-green-500" /> Offline Counted Products
