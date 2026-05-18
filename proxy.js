@@ -2,9 +2,6 @@
 import { NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 
-// Specify Node.js runtime instead of Edge
-export const runtime = 'nodejs';
-
 const JWT_SECRET = process.env.JWT_SECRET || 'MAGMAIS89LAVA';
 
 // Simple verify function without external deps
@@ -67,11 +64,3 @@ export async function proxy(request) {
   
   return NextResponse.next();
 }
-
-// Configure which routes to run proxy on
-export const config = {
-  matcher: [
-    '/admin/:path*',
-    '/api/v1/admin/:path*',
-  ],
-};
