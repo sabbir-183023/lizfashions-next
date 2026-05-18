@@ -2,10 +2,18 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useCart } from "@/context/CartContext";
+import { useCart } from "@/app/context/CartContext";
 import Image from "next/image";
 import Link from "next/link";
-import { FaTrash, FaPlus, FaMinus, FaTag, FaTruck, FaCheckCircle } from "react-icons/fa";
+import toast from 'react-hot-toast';
+import {
+  FaTrash,
+  FaPlus,
+  FaMinus,
+  FaTag,
+  FaTruck,
+  FaCheckCircle,
+} from "react-icons/fa";
 
 // Shimmer loading component
 const CartShimmer = () => (
@@ -148,7 +156,8 @@ const DistrictSelector = ({ value, onChange, error }) => {
   return (
     <div className="relative">
       <label className="block text-sm font-medium text-gray-700 mb-1">
-        District <span className="text-sm">(জেলা)</span> <span className="text-red-500">*</span>
+        District <span className="text-sm">(জেলা)</span>{" "}
+        <span className="text-red-500">*</span>
       </label>
       <div
         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent cursor-pointer bg-white text-gray-800"
@@ -267,6 +276,7 @@ const CartPage = () => {
     getCartTotal,
     getCartCount,
   } = useCart();
+  console.log(cartItems)
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -333,7 +343,7 @@ const CartPage = () => {
 
   const handleApplyCoupon = async () => {
     if (!couponCode) {
-      setCouponMessage("কুপন কোড লিখুন");
+      toast.error("কুপন কোড লিখুন");
       return;
     }
 
@@ -349,12 +359,15 @@ const CartPage = () => {
       if (data.success) {
         setCouponDiscount(data.discount);
         setCouponMessage(`✅ ${data.message}`);
+         toast.success(data.message);
       } else {
         setCouponDiscount(0);
         setCouponMessage(`❌ ${data.message}`);
+        toast.error(data.message);
       }
     } catch (error) {
       setCouponMessage("❌ কুপন কোড যাচাই করতে সমস্যা হয়েছে");
+      toast.error("কুপন কোড যাচাই করতে সমস্যা হয়েছে");
     } finally {
       setIsApplyingCoupon(false);
     }
@@ -363,32 +376,49 @@ const CartPage = () => {
   const handlePlaceOrder = async () => {
     if (!validateForm()) return;
     if (cartItems.length === 0) {
-      alert("আপনার কার্ট খালি");
+      toast.error("আপনার কার্ট খালি");
       return;
     }
 
     setIsSubmitting(true);
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const orderData = {
+        items: cartItems,
+        customer: customerInfo,
+        subtotal: subtotal,
+        deliveryCharge: deliveryCharge,
+        discount: couponDiscount,
+        total: total,
+        couponCode: couponDiscount > 0 ? couponCode : null,
+      };
 
-    const orderData = {
-      items: cartItems,
-      customer: customerInfo,
-      subtotal,
-      deliveryCharge,
-      discount: couponDiscount,
-      total,
-      couponCode: couponDiscount > 0 ? couponCode : null,
-      orderDate: new Date().toISOString(),
-    };
+      const response = await fetch("/api/v1/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(orderData),
+      });
 
-    console.log("Order placed:", orderData);
-    
-    // Clear cart and show success modal
-    clearCart();
-    setIsSubmitting(false);
-    setShowSuccessModal(true);
+      const data = await response.json();
+
+      if (data.success) {
+        // Clear cart and show success modal
+        clearCart();
+        setShowSuccessModal(true);
+          toast.success("অর্ডার সফলভাবে সম্পন্ন হয়েছে!");
+        // Optional: Store order info in localStorage or state for receipt page
+        localStorage.setItem("lastOrder", JSON.stringify(data.data));
+      } else {
+        toast.error(data.message || "অর্ডার করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।");
+      }
+    } catch (error) {
+      console.error("Order placement error:", error);
+      toast.error("নেটওয়ার্ক সমস্যার কারণে অর্ডার করতে পারছি না। আবার চেষ্টা করুন।");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCloseModal = () => {
@@ -450,11 +480,14 @@ const CartPage = () => {
               <div className="space-y-3 pb-4 border-b">
                 <div className="flex justify-between text-gray-700">
                   <span>পণ্যের মূল্য ({getCartCount()}টি)</span>
-                  <span className="font-semibold text-gray-800">৳{subtotal}</span>
+                  <span className="font-semibold text-gray-800">
+                    ৳{subtotal}
+                  </span>
                 </div>
                 <div className="flex justify-between text-gray-700">
                   <span className="flex items-center gap-1">
-                    <FaTruck size={14} className="text-gray-600" /> ডেলিভারি চার্জ
+                    <FaTruck size={14} className="text-gray-600" /> ডেলিভারি
+                    চার্জ
                   </span>
                   <span className="text-gray-800">৳{deliveryCharge}</span>
                 </div>
@@ -475,7 +508,8 @@ const CartPage = () => {
             {/* Coupon Section */}
             <div className="bg-white rounded-lg p-4 sm:p-6 shadow-md border">
               <h2 className="text-base sm:text-lg font-bold text-[#0E2238] mb-3 flex items-center gap-2">
-                <FaTag className="text-[#FDC700] text-sm sm:text-base" /> কুপন কোড
+                <FaTag className="text-[#FDC700] text-sm sm:text-base" /> কুপন
+                কোড
               </h2>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
@@ -506,12 +540,15 @@ const CartPage = () => {
 
         {/* Customer Information Form */}
         <div className="mt-8 bg-white rounded-lg p-6 shadow-md border">
-          <h2 className="text-lg font-bold text-[#0E2238] mb-4">Customer's Info <span className="text-sm">(ক্রেতার তথ্য)</span></h2>
+          <h2 className="text-lg font-bold text-[#0E2238] mb-4">
+            Customer's Info <span className="text-sm">(ক্রেতার তথ্য)</span>
+          </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Full Name <span className="text-sm">(সম্পূর্ণ নাম)</span> <span className="text-red-500">*</span>
+                Full Name <span className="text-sm">(সম্পূর্ণ নাম)</span>{" "}
+                <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -529,7 +566,8 @@ const CartPage = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Phone No. <span className="text-sm">(ফোন নম্বর)</span> <span className="text-red-500">*</span>
+                Phone No. <span className="text-sm">(ফোন নম্বর)</span>{" "}
+                <span className="text-red-500">*</span>
               </label>
               <input
                 type="tel"
@@ -555,7 +593,9 @@ const CartPage = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Thana/Upazilla <span className="text-sm">(থানা বা উপজেলার নাম)</span> <span className="text-red-500">*</span>
+                Thana/Upazilla{" "}
+                <span className="text-sm">(থানা বা উপজেলার নাম)</span>{" "}
+                <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -578,7 +618,8 @@ const CartPage = () => {
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Full Address <span className="text-sm">(সম্পূর্ণ ঠিকানা)</span> <span className="text-red-500">*</span>
+                Full Address <span className="text-sm">(সম্পূর্ণ ঠিকানা)</span>{" "}
+                <span className="text-red-500">*</span>
               </label>
               <textarea
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#FDC700] focus:border-transparent text-gray-800 placeholder-gray-400 ${errors.address ? "border-red-500" : ""}`}

@@ -4,7 +4,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useCart } from "@/context/CartContext";
+import { useCart } from "@/app/context/CartContext";
 import { FaShoppingCart, FaCheck, FaSpinner, FaStar } from "react-icons/fa";
 
 const LatestProducts = () => {

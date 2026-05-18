@@ -16,7 +16,7 @@ import {
   FaChevronRight,
   FaCheck
 } from "react-icons/fa";
-import { useCart } from "@/context/CartContext";
+import { useCart } from "@/app/context/CartContext";
 
 // Fullscreen Image Viewer Component
 const FullscreenImageViewer = ({ images, currentIndex, onClose, onNavigate }) => {
