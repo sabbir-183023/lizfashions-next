@@ -3,8 +3,14 @@
 
 import React, { useState } from "react";
 import { FaBoxOpen, FaBarcode, FaShoppingCart } from "react-icons/fa";
+import { BiSolidDiscount } from "react-icons/bi";
+import { TfiLayoutSlider } from "react-icons/tfi";
+import { SiBlogger } from "react-icons/si";
 import CustomSales from "@/app/components/admin/services/CustomSales";
 import InventoryCount from "@/app/components/admin/services/InventoryCount";
+import Coupon from "@/app/components/admin/services/Coupon";
+import Slideshow from "@/app/components/admin/services/Slideshow";
+import Blog from "@/app/components/admin/services/Blog";
 
 const Services = () => {
   const [activeService, setActiveService] = useState("custom-sales");
@@ -17,10 +23,19 @@ const Services = () => {
       icon: <FaBoxOpen />,
     },
     {
-      id: "wholesale",
-      name: "Wholesale",
-      icon: <FaBarcode />,
-      comingSoon: true,
+      id: "coupon",
+      name: "Coupon",
+      icon: <BiSolidDiscount />,
+    },
+    {
+      id: "slideshow",
+      name: "Slideshow",
+      icon: <TfiLayoutSlider />,
+    },
+    {
+      id: "blog",
+      name: "Blog",
+      icon: <SiBlogger />,
     },
   ];
 
@@ -30,8 +45,12 @@ const Services = () => {
         return <CustomSales />;
       case "inventory-count":
         return <InventoryCount />;
-      case "wholesale":
-        return <Wholesale />;
+      case "coupon":
+        return <Coupon />;
+      case "slideshow":
+        return <Slideshow />;
+      case "blog":
+        return <Blog />;
       default:
         return <CustomSales />;
     }

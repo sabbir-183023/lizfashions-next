@@ -1,3 +1,4 @@
+// app/models/Inventory.js (keep as is - NO CHANGES)
 import mongoose from "mongoose";
 
 const inventorySchema = new mongoose.Schema({
@@ -13,6 +14,10 @@ const inventorySchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Category",
     required: true,
+  },
+  linkedProduct: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Product",
   },
   supplier: {
     type: String,

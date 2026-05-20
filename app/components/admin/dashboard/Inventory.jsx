@@ -15,6 +15,9 @@ import {
   FaTimes,
   FaSave,
   FaCopy,
+  FaBox,
+  FaBoxOpen,
+  FaTag,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 
@@ -23,11 +26,15 @@ const Inventory = () => {
   const [filteredInventory, setFilteredInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+
+  console.log(filteredInventory);
 
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [stockStatus, setStockStatus] = useState("");
+  const [productStatus, setProductStatus] = useState("");
   const [submitLoading, setSubmitLoading] = useState(false);
 
   // Modal states
@@ -52,11 +59,14 @@ const Inventory = () => {
     lowStock: 0,
     outOfStock: 0,
     inStock: 0,
+    uploadedToProduct: 0,
+    notUploaded: 0,
   });
 
   // Fetch categories
   useEffect(() => {
     fetchCategories();
+    fetchProducts();
   }, []);
 
   // Fetch inventory on mount
@@ -67,7 +77,14 @@ const Inventory = () => {
   // Apply filters whenever filter criteria change
   useEffect(() => {
     applyFilters();
-  }, [searchTerm, selectedCategory, stockStatus, inventory]);
+  }, [
+    searchTerm,
+    selectedCategory,
+    stockStatus,
+    productStatus,
+    inventory,
+    products,
+  ]);
 
   const fetchCategories = async () => {
     try {
@@ -81,6 +98,18 @@ const Inventory = () => {
     }
   };
 
+  const fetchProducts = async () => {
+    try {
+      const response = await fetch("/api/v1/products?limit=1000");
+      const data = await response.json();
+      if (data.success) {
+        setProducts(data.products);
+      }
+    } catch (error) {
+      console.error("Failed to fetch products:", error);
+    }
+  };
+
   const fetchInventory = async () => {
     setLoading(true);
     try {
@@ -88,8 +117,23 @@ const Inventory = () => {
       const data = await response.json();
 
       if (data.success) {
+        // Use the API's matching results directly - DON'T re-match on client
+        console.log("📊 API Stats:", data.stats);
+        console.log("📊 Sample item:", data.inventory[0]);
+
+        // The API already provides isLinkedToProduct flag
         setInventory(data.inventory);
         calculateStats(data.inventory);
+
+        // Update stats from API response for accuracy
+        if (data.stats) {
+          setStats((prev) => ({
+            ...prev,
+            uploadedToProduct: data.stats.uploaded,
+            notUploaded: data.stats.notUploaded,
+            totalProducts: data.stats.total,
+          }));
+        }
       } else {
         toast.error(data.message || "Failed to fetch inventory");
       }
@@ -99,6 +143,27 @@ const Inventory = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const calculateStats = (items) => {
+    const outOfStock = items.filter((item) => item.currentQty === 0).length;
+    const lowStock = items.filter(
+      (item) => item.currentQty > 0 && item.currentQty <= 10,
+    ).length;
+    const inStock = items.filter((item) => item.currentQty > 0).length;
+    const uploadedToProduct = items.filter(
+      (item) => item.isLinkedToProduct,
+    ).length;
+    const notUploaded = items.filter((item) => !item.isLinkedToProduct).length;
+
+    setStats({
+      totalProducts: items.length,
+      lowStock,
+      outOfStock,
+      inStock,
+      uploadedToProduct,
+      notUploaded,
+    });
   };
 
   const applyFilters = () => {
@@ -129,28 +194,20 @@ const Inventory = () => {
       filtered = filtered.filter((item) => item.currentQty > 0);
     }
 
+    if (productStatus === "uploaded") {
+      filtered = filtered.filter((item) => item.isLinkedToProduct);
+    } else if (productStatus === "not_uploaded") {
+      filtered = filtered.filter((item) => !item.isLinkedToProduct);
+    }
+
     setFilteredInventory(filtered);
-  };
-
-  const calculateStats = (items) => {
-    const outOfStock = items.filter((item) => item.currentQty === 0).length;
-    const lowStock = items.filter(
-      (item) => item.currentQty > 0 && item.currentQty <= 10,
-    ).length;
-    const inStock = items.filter((item) => item.currentQty > 0).length;
-
-    setStats({
-      totalProducts: items.length,
-      lowStock,
-      outOfStock,
-      inStock,
-    });
   };
 
   const handleClearFilters = () => {
     setSearchTerm("");
     setSelectedCategory("");
     setStockStatus("");
+    setProductStatus("");
   };
 
   const handleAddClick = () => {
@@ -160,7 +217,7 @@ const Inventory = () => {
       productName: "",
       category: "",
       supplier: "",
-      barcode: "", // Blank for new products
+      barcode: "",
       initialQty: 0,
       currentQty: 0,
       purchaseRate: 0,
@@ -177,7 +234,7 @@ const Inventory = () => {
       productName: item.productName,
       category: item.categoryId || item.category?._id || "",
       supplier: item.supplier || "",
-      barcode: item.barcode || "", // Show existing barcode for editing
+      barcode: item.barcode || "",
       initialQty: item.initialQty,
       currentQty: item.currentQty,
       purchaseRate: item.purchaseRate,
@@ -219,10 +276,9 @@ const Inventory = () => {
 
       const method = editingItem ? "PUT" : "POST";
 
-      // For new products, send empty barcode to trigger auto-generation
       const submitData = { ...formData };
       if (!editingItem && (!submitData.barcode || submitData.barcode === "")) {
-        submitData.barcode = ""; // Send empty to trigger auto-generation on server
+        submitData.barcode = "";
       }
 
       const response = await fetch(url, {
@@ -252,13 +308,12 @@ const Inventory = () => {
     }
   };
 
-  // Copy barcode to clipboard
   const copyToClipboard = async (barcode, productName) => {
     if (!barcode || barcode === "-") {
       toast.error("No barcode to copy");
       return;
     }
-    
+
     try {
       await navigator.clipboard.writeText(barcode);
       toast.success(`Barcode ${barcode} copied for ${productName}`);
@@ -268,20 +323,38 @@ const Inventory = () => {
     }
   };
 
-  const handlePrint = () => {
+  const handlePrintAll = () => {
+    printInventory(filteredInventory, "Complete Inventory Report");
+  };
+
+  const handlePrintNotUploaded = () => {
+    const notUploadedItems = filteredInventory.filter(
+      (item) => !item.isLinkedToProduct,
+    );
+    if (notUploadedItems.length === 0) {
+      toast.error("No items found that are not uploaded as products");
+      return;
+    }
+    printInventory(
+      notUploadedItems,
+      "Not Uploaded as Product - Inventory Report",
+    );
+  };
+
+  const printInventory = (items, title) => {
     const printWindow = window.open("", "_blank");
-    const inStockItems = filteredInventory.filter(
-      (item) => item.currentQty > 0,
-    );
-    const outOfStockItems = filteredInventory.filter(
-      (item) => item.currentQty === 0,
-    );
+    const inStockItems = items.filter((item) => item.currentQty > 0);
+    const outOfStockItems = items.filter((item) => item.currentQty === 0);
+    const uploadedCount = items.filter((item) => item.isLinkedToProduct).length;
+    const notUploadedCount = items.filter(
+      (item) => !item.isLinkedToProduct,
+    ).length;
 
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Inventory Report</title>
+          <title>${title}</title>
           <style>
             body { 
               font-family: Arial, sans-serif; 
@@ -317,19 +390,21 @@ const Inventory = () => {
               background-color: #f2f2f2;
               font-weight: bold;
             }
-            .section-title {
-              background-color: #e5e7eb;
-              font-weight: bold;
-              font-size: 14px;
+            .product-badge {
+              background-color: #22c55e;
+              color: white;
+              padding: 2px 6px;
+              border-radius: 12px;
+              font-size: 10px;
+              display: inline-block;
             }
-            .text-green {
-              color: #16a34a;
-            }
-            .text-red {
-              color: #dc2626;
-            }
-            .text-blue {
-              color: #2563eb;
+            .no-product-badge {
+              background-color: #ef4444;
+              color: white;
+              padding: 2px 6px;
+              border-radius: 12px;
+              font-size: 10px;
+              display: inline-block;
             }
             .footer {
               margin-top: 30px;
@@ -337,17 +412,14 @@ const Inventory = () => {
               font-size: 10px;
               color: #666;
             }
-            /* Hide copy buttons in print */
-            .no-print {
-              display: none;
-            }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>Inventory Report</h1>
+            <h1>${title}</h1>
             <p>Date: ${new Date().toLocaleDateString()}</p>
-            <p>Total Items: ${filteredInventory.length} | In Stock: ${inStockItems.length} | Out of Stock: ${outOfStockItems.length}</p>
+            <p>Total Items: ${items.length} | In Stock: ${inStockItems.length} | Out of Stock: ${outOfStockItems.length}</p>
+            <p>Uploaded as Product: ${uploadedCount} | Not Uploaded: ${notUploadedCount}</p>
           </div>
           
           <table>
@@ -362,11 +434,12 @@ const Inventory = () => {
                 <th>Purchase Rate</th>
                 <th>Sale Rate</th>
                 <th>Profit</th>
-                <th>Status</th>
+                <th>Product Status</th>
+                <th>Stock Status</th>
               </tr>
             </thead>
             <tbody>
-              ${inStockItems
+              ${items
                 .map(
                   (item) => `
                 <tr>
@@ -379,39 +452,18 @@ const Inventory = () => {
                   <td>৳${item.purchaseRate}</td>
                   <td>৳${item.saleRate}</td>
                   <td class="text-green">৳${item.profitPerProduct}</td>
-                  <td>${item.currentQty <= 10 ? "Low Stock" : "In Stock"}</td>
+                  <td>
+                    ${
+                      item.isLinkedToProduct
+                        ? '<span class="product-badge">✓ Uploaded</span>'
+                        : '<span class="no-product-badge">✗ Not Uploaded</span>'
+                    }
+                  </td>
+                  <td>${item.currentQty === 0 ? "Out of Stock" : item.currentQty <= 10 ? "Low Stock" : "In Stock"}</td>
                 </tr>
               `,
                 )
                 .join("")}
-              
-              ${
-                outOfStockItems.length > 0
-                  ? `
-                <tr class="section-title">
-                  <td colspan="10" style="background-color: #fee2e2; color: #dc2626;">Out of Stock Items</td>
-                </tr>
-                ${outOfStockItems
-                  .map(
-                    (item) => `
-                  <tr>
-                    <td>${new Date(item.date).toLocaleDateString()}</td>
-                    <td>${item.productName}</td>
-                    <td>${item.barcode || "-"}</td>
-                    <td>${item.categoryName}</td>
-                    <td>${item.initialQty}</td>
-                    <td class="text-red">${item.currentQty}</td>
-                    <td>৳${item.purchaseRate}</td>
-                    <td>৳${item.saleRate}</td>
-                    <td class="text-green">৳${item.profitPerProduct}</td>
-                    <td class="text-red">Out of Stock</td>
-                  </tr>
-                `,
-                  )
-                  .join("")}
-              `
-                  : ""
-              }
             </tbody>
           </table>
           
@@ -470,13 +522,8 @@ const Inventory = () => {
     };
   };
 
-  const outOfStockItems = filteredInventory.filter(
-    (item) => item.currentQty === 0,
-  );
-  const inStockItems = filteredInventory.filter((item) => item.currentQty > 0);
-
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(120vh)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(150vh)] md:h-[calc(120vh)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -490,10 +537,17 @@ const Inventory = () => {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={handlePrint}
+              onClick={handlePrintNotUploaded}
+              className="bg-orange-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-orange-700 transition-colors flex items-center gap-2 text-sm sm:text-base"
+              title="Print items not uploaded as products"
+            >
+              <FaBoxOpen className="text-xs sm:text-sm" /> Print Not Uploaded
+            </button>
+            <button
+              onClick={handlePrintAll}
               className="bg-gray-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm sm:text-base"
             >
-              <FaPrint className="text-xs sm:text-sm" /> Print
+              <FaPrint className="text-xs sm:text-sm" /> Print All
             </button>
             <button
               onClick={handleAddClick}
@@ -506,48 +560,56 @@ const Inventory = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 p-4 sm:p-6 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        <div className="bg-white rounded-lg p-3 sm:p-4 text-center shadow-sm">
-          <FaWarehouse className="text-blue-500 text-xl sm:text-2xl mx-auto mb-2" />
-          <p className="text-xl sm:text-2xl font-bold text-gray-800">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 p-4 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaWarehouse className="text-blue-500 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-gray-800">
             {stats.totalProducts}
           </p>
-          <p className="text-gray-600 text-xs sm:text-sm">Total Items</p>
+          <p className="text-xs text-gray-500">Total Items</p>
         </div>
-        <div className="bg-white rounded-lg p-3 sm:p-4 text-center shadow-sm">
-          <FaExclamationTriangle className="text-yellow-500 text-xl sm:text-2xl mx-auto mb-2" />
-          <p className="text-xl sm:text-2xl font-bold text-yellow-600">
-            {stats.lowStock}
-          </p>
-          <p className="text-gray-600 text-xs sm:text-sm">Low Stock</p>
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaExclamationTriangle className="text-yellow-500 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-yellow-600">{stats.lowStock}</p>
+          <p className="text-xs text-gray-500">Low Stock</p>
         </div>
-        <div className="bg-white rounded-lg p-3 sm:p-4 text-center shadow-sm">
-          <FaExclamationTriangle className="text-red-500 text-xl sm:text-2xl mx-auto mb-2" />
-          <p className="text-xl sm:text-2xl font-bold text-red-600">
-            {stats.outOfStock}
-          </p>
-          <p className="text-gray-600 text-xs sm:text-sm">Out of Stock</p>
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaExclamationTriangle className="text-red-500 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-red-600">{stats.outOfStock}</p>
+          <p className="text-xs text-gray-500">Out of Stock</p>
         </div>
-        <div className="bg-white rounded-lg p-3 sm:p-4 text-center shadow-sm">
-          <FaCheckCircle className="text-green-500 text-xl sm:text-2xl mx-auto mb-2" />
-          <p className="text-xl sm:text-2xl font-bold text-green-600">
-            {stats.inStock}
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaCheckCircle className="text-green-500 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-green-600">{stats.inStock}</p>
+          <p className="text-xs text-gray-500">In Stock</p>
+        </div>
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaTag className="text-green-600 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-green-600">
+            {stats.uploadedToProduct}
           </p>
-          <p className="text-gray-600 text-xs sm:text-sm">In Stock</p>
+          <p className="text-xs text-gray-500">Uploaded to Products</p>
+        </div>
+        <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+          <FaBoxOpen className="text-orange-500 text-xl mx-auto mb-1" />
+          <p className="text-lg font-bold text-orange-600">
+            {stats.notUploaded}
+          </p>
+          <p className="text-xs text-gray-500">Not Uploaded</p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="p-4 sm:p-6 flex-shrink-0 border-b border-gray-200 space-y-4">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
+        <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
+          <div className="flex-1 min-w-[200px] relative">
             <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
             <input
               type="text"
               placeholder="Search by product name or barcode..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
             />
           </div>
 
@@ -556,7 +618,7 @@ const Inventory = () => {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent appearance-none bg-white"
+              className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 appearance-none bg-white"
             >
               <option value="">All Categories</option>
               {categories.map((cat) => (
@@ -571,7 +633,7 @@ const Inventory = () => {
             <select
               value={stockStatus}
               onChange={(e) => setStockStatus(e.target.value)}
-              className="w-full px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+              className="w-full px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
             >
               <option value="">All Stock</option>
               <option value="in">In Stock (Qty &gt; 0)</option>
@@ -580,7 +642,19 @@ const Inventory = () => {
             </select>
           </div>
 
-          {(searchTerm || selectedCategory || stockStatus) && (
+          <div className="sm:w-48">
+            <select
+              value={productStatus}
+              onChange={(e) => setProductStatus(e.target.value)}
+              className="w-full px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+            >
+              <option value="">All Products</option>
+              <option value="uploaded">Uploaded as Product</option>
+              <option value="not_uploaded">Not Uploaded</option>
+            </select>
+          </div>
+
+          {(searchTerm || selectedCategory || stockStatus || productStatus) && (
             <button
               onClick={handleClearFilters}
               className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -602,37 +676,40 @@ const Inventory = () => {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500">
                   Date
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500">
                   Product
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500">
                   Barcode
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500">
                   Category
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-center text-xs font-medium text-gray-500">
                   Initial
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-center text-xs font-medium text-gray-500">
                   Current
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500">
                   Purchase
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500">
                   Sale
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500">
                   Profit
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
+                <th className="px-3 sm:px-4 py-3 text-center text-xs font-medium text-gray-500">
+                  Product Status
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 sm:px-4 py-3 text-center text-xs font-medium text-gray-500">
+                  Stock
+                </th>
+                <th className="px-3 sm:px-4 py-3 text-center text-xs font-medium text-gray-500">
                   Actions
                 </th>
               </tr>
@@ -640,7 +717,7 @@ const Inventory = () => {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan="11" className="text-center py-12">
+                  <td colSpan="12" className="text-center py-12">
                     <div className="flex justify-center items-center">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-400"></div>
                     </div>
@@ -649,173 +726,101 @@ const Inventory = () => {
                 </tr>
               ) : filteredInventory.length === 0 ? (
                 <tr>
-                  <td colSpan="11" className="text-center py-12 text-gray-500">
+                  <td colSpan="12" className="text-center py-12 text-gray-500">
                     No inventory items found
                   </td>
                 </tr>
               ) : (
-                <>
-                  {inStockItems.map((item) => {
-                    const status = getStockStatus(item.currentQty);
-                    return (
-                      <tr
-                        key={item._id}
-                        className="hover:bg-gray-50 transition-colors"
-                      >
-                        <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                          {new Date(item.date).toLocaleDateString()}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs font-medium text-gray-800">
-                          {item.productName}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-gray-500">
-                          <div className="flex items-center gap-1">
-                            <span>{item.barcode || "-"}</span>
-                            {item.barcode && (
-                              <button
-                                onClick={() => copyToClipboard(item.barcode, item.productName)}
-                                className="text-gray-400 hover:text-blue-600 transition-colors no-print"
-                                title="Copy barcode"
-                              >
-                                <FaCopy className="text-xs" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                          {item.categoryName}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                          {item.initialQty}
-                        </td>
-                        <td
-                          className={`px-3 sm:px-4 py-3 text-xs font-semibold ${item.currentQty <= 10 ? "text-yellow-600" : "text-green-600"}`}
-                        >
-                          {item.currentQty}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-blue-600">
-                          ৳{item.purchaseRate}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-blue-600">
-                          ৳{item.saleRate}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 text-xs text-green-600 font-semibold">
-                          ৳{item.profitPerProduct}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-xs ${status.bgColor} ${status.textColor}`}
-                          >
-                            {status.text}
-                          </span>
-                        </td>
-                        <td className="px-3 sm:px-4 py-3">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEditClick(item)}
-                              className="text-blue-600 hover:text-blue-800 p-1 transition-colors"
-                              title="Edit"
-                            >
-                              <FaEdit className="text-xs sm:text-sm" />
-                            </button>
+                filteredInventory.map((item) => {
+                  const status = getStockStatus(item.currentQty);
+                  return (
+                    <tr
+                      key={item._id}
+                      className={`hover:bg-gray-50 transition-colors ${!item.isLinkedToProduct ? "bg-orange-50/30" : ""}`}
+                    >
+                      <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
+                        {new Date(item.date).toLocaleDateString()}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-sm font-medium text-gray-800">
+                        {item.productName}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-xs text-gray-500">
+                        <div className="flex items-center gap-1">
+                          <span>{item.barcode || "-"}</span>
+                          {item.barcode && (
                             <button
                               onClick={() =>
-                                handleDeleteClick(item._id, item.productName)
+                                copyToClipboard(item.barcode, item.productName)
                               }
-                              className="text-red-600 hover:text-red-800 p-1 transition-colors"
-                              title="Delete"
+                              className="text-gray-400 hover:text-blue-600 transition-colors no-print"
+                              title="Copy barcode"
                             >
-                              <FaTrash className="text-xs sm:text-sm" />
+                              <FaCopy className="text-xs" />
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                  {outOfStockItems.length > 0 && (
-                    <>
-                      <tr className="bg-red-50">
-                        <td
-                          colSpan="11"
-                          className="px-3 sm:px-4 py-3 text-sm font-bold text-red-700"
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
+                        {item.categoryName}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-center text-xs text-gray-600">
+                        {item.initialQty}
+                      </td>
+                      <td
+                        className={`px-3 sm:px-4 py-3 text-center text-xs font-semibold ${item.currentQty === 0 ? "text-red-600" : item.currentQty <= 10 ? "text-yellow-600" : "text-green-600"}`}
+                      >
+                        {item.currentQty}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-right text-xs text-blue-600">
+                        ৳{item.purchaseRate}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-right text-xs text-blue-600">
+                        ৳{item.saleRate}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-right text-xs text-green-600 font-semibold">
+                        ৳{item.profitPerProduct}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-center">
+                        {item.isLinkedToProduct ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700">
+                            <FaCheckCircle className="text-xs" /> Uploaded
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-orange-100 text-orange-700">
+                            <FaBoxOpen className="text-xs" /> Not Uploaded
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs ${status.bgColor} ${status.textColor}`}
                         >
-                          ⚠️ Out of Stock Items ({outOfStockItems.length})
-                        </td>
-                      </tr>
-                      {outOfStockItems.map((item) => (
-                        <tr
-                          key={item._id}
-                          className="hover:bg-gray-50 transition-colors bg-red-50/30"
-                        >
-                          <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                            {new Date(item.date).toLocaleDateString()}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs font-medium text-gray-800">
-                            {item.productName}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-gray-500">
-                            <div className="flex items-center gap-1">
-                              <span>{item.barcode || "-"}</span>
-                              {item.barcode && (
-                                <button
-                                  onClick={() => copyToClipboard(item.barcode, item.productName)}
-                                  className="text-gray-400 hover:text-blue-600 transition-colors no-print"
-                                  title="Copy barcode"
-                                >
-                                  <FaCopy className="text-xs" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                            {item.categoryName}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-gray-600">
-                            {item.initialQty}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs font-semibold text-red-600">
-                            {item.currentQty}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-blue-600">
-                            ৳{item.purchaseRate}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-blue-600">
-                            ৳{item.saleRate}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3 text-xs text-green-600 font-semibold">
-                            ৳{item.profitPerProduct}
-                          </td>
-                          <td className="px-3 sm:px-4 py-3">
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700">
-                              Out of Stock
-                            </span>
-                          </td>
-                          <td className="px-3 sm:px-4 py-3">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleEditClick(item)}
-                                className="text-blue-600 hover:text-blue-800 p-1 transition-colors"
-                                title="Edit"
-                              >
-                                <FaEdit className="text-xs sm:text-sm" />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleDeleteClick(item._id, item.productName)
-                                }
-                                className="text-red-600 hover:text-red-800 p-1 transition-colors"
-                                title="Delete"
-                              >
-                                <FaTrash className="text-xs sm:text-sm" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </>
-                  )}
-                </>
+                          {status.text}
+                        </span>
+                      </td>
+                      <td className="px-3 sm:px-4 py-3">
+                        <div className="flex gap-2 justify-center">
+                          <button
+                            onClick={() => handleEditClick(item)}
+                            className="text-blue-600 hover:text-blue-800 p-1 transition-colors"
+                            title="Edit"
+                          >
+                            <FaEdit className="text-xs sm:text-sm" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleDeleteClick(item._id, item.productName)
+                            }
+                            className="text-red-600 hover:text-red-800 p-1 transition-colors"
+                            title="Delete"
+                          >
+                            <FaTrash className="text-xs sm:text-sm" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -850,10 +855,9 @@ const Inventory = () => {
                     value={formData.date}
                     onChange={handleInputChange}
                     required
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Product Name *
@@ -864,10 +868,9 @@ const Inventory = () => {
                     value={formData.productName}
                     onChange={handleInputChange}
                     required
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Category *
@@ -877,7 +880,7 @@ const Inventory = () => {
                     value={formData.category}
                     onChange={handleInputChange}
                     required
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                   >
                     <option value="">Select Category</option>
                     {categories.map((cat) => (
@@ -887,7 +890,6 @@ const Inventory = () => {
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Supplier
@@ -897,10 +899,9 @@ const Inventory = () => {
                     name="supplier"
                     value={formData.supplier}
                     onChange={handleInputChange}
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Barcode/SKU {!editingItem && "(Auto-generated)"}
@@ -911,8 +912,10 @@ const Inventory = () => {
                     value={formData.barcode}
                     onChange={handleInputChange}
                     readOnly={!editingItem}
-                    placeholder={!editingItem ? "Will be auto-generated" : "Enter barcode"}
-                    className={`w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent ${!editingItem ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                    placeholder={
+                      !editingItem ? "Will be auto-generated" : "Enter barcode"
+                    }
+                    className={`w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg ${!editingItem ? "bg-gray-100 cursor-not-allowed" : ""}`}
                   />
                   {!editingItem && (
                     <p className="text-xs text-gray-500 mt-1">
@@ -920,7 +923,6 @@ const Inventory = () => {
                     </p>
                   )}
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Initial Quantity *
@@ -932,10 +934,9 @@ const Inventory = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Current Quantity *
@@ -947,10 +948,9 @@ const Inventory = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Purchase Rate *
@@ -962,10 +962,9 @@ const Inventory = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     CPP (Cost Per Product) *
@@ -977,10 +976,9 @@ const Inventory = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Sale Rate *
@@ -992,7 +990,7 @@ const Inventory = () => {
                     onChange={handleInputChange}
                     required
                     min="0"
-                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                    className="w-full text-gray-600 px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
@@ -1009,7 +1007,8 @@ const Inventory = () => {
                     <span className="ml-2 font-semibold text-blue-600">
                       ৳
                       {(
-                        Number(formData.purchaseRate || 0) + Number(formData.CPP || 0)
+                        Number(formData.purchaseRate || 0) +
+                        Number(formData.CPP || 0)
                       ).toFixed(2)}
                     </span>
                   </div>
@@ -1019,7 +1018,8 @@ const Inventory = () => {
                       ৳
                       {(
                         Number(formData.saleRate || 0) -
-                        (Number(formData.purchaseRate || 0) + Number(formData.CPP || 0))
+                        (Number(formData.purchaseRate || 0) +
+                          Number(formData.CPP || 0))
                       ).toFixed(2)}
                     </span>
                   </div>
@@ -1031,14 +1031,14 @@ const Inventory = () => {
                   type="button"
                   disabled={submitLoading}
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitLoading}
-                  className="px-4 py-2 bg-yellow-400 text-blue-900 rounded-lg font-semibold hover:bg-yellow-300 transition-colors flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:bg-yellow-200 disabled:text-blue-700"
+                  className="px-4 py-2 bg-yellow-400 text-blue-900 rounded-lg font-semibold hover:bg-yellow-300 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <FaSave />{" "}
                   {submitLoading

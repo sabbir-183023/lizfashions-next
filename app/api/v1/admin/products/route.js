@@ -1,4 +1,4 @@
-// app/api/v1/admin/products/route.js - Fixed version
+// app/api/v1/admin/products/route.js - Using aggregation
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/app/lib/mongodb';
 import Product from '@/app/models/Product';
@@ -29,21 +29,16 @@ export async function GET(request) {
     const sortBy = searchParams.get('sortBy') || 'createdAt';
     const sortOrder = searchParams.get('sortOrder') || 'desc';
     
-    // Build query
-    let query = {};
+    // Calculate skip
+    const skip = (page - 1) * limit;
     
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { SKU: { $regex: search, $options: 'i' } }
-      ];
-    }
+    // Build match stage
+    let matchStage = {};
     
-    // Handle category filter - check if it's a valid ObjectId
+    // Handle category filter
     if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
-      query.category = new mongoose.Types.ObjectId(categoryId);
+      matchStage.category = new mongoose.Types.ObjectId(categoryId);
     } else if (categoryId) {
-      // If invalid ObjectId, return empty results
       return NextResponse.json({
         success: true,
         products: [],
@@ -51,41 +46,79 @@ export async function GET(request) {
           currentPage: page,
           totalPages: 0,
           totalItems: 0,
-          itemsPerPage: limit,
-          hasNextPage: false,
-          hasPrevPage: false
+          itemsPerPage: limit
         }
       }, { status: 200 });
     }
     
-    // Calculate skip
-    const skip = (page - 1) * limit;
+    // Build search stage
+    let searchStage = {};
+    if (search) {
+      const searchStr = String(search);
+      const searchRegex = new RegExp(searchStr, 'i');
+      
+      // Using $or with $regex for string fields and $toString for SKU
+      searchStage = {
+        $or: [
+          { name: searchRegex },
+          { slug: searchRegex },
+          { description: searchRegex },
+          { SKU: searchRegex },
+          // For numeric SKU stored as number
+          { $expr: { $regexMatch: { input: { $toString: "$SKU" }, regex: searchStr, options: 'i' } } }
+        ]
+      };
+    }
     
-    // Build sort object
-    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+    // Combine match and search
+    const finalMatchStage = { ...matchStage };
+    if (searchStage.$or) {
+      finalMatchStage.$and = [searchStage];
+    }
     
-    // Execute queries in parallel with population for category name
-    const [products, totalCount] = await Promise.all([
-      Product.find(query)
-        .select('name slug SKU sellingPrice quantity photos category createdAt')
-        .populate('category', 'name') // Populate category name
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Product.countDocuments(query)
+    // Build aggregation pipeline
+    const pipeline = [
+      { $match: finalMatchStage },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryInfo'
+        }
+      },
+      {
+        $addFields: {
+          categoryName: { $ifNull: [{ $arrayElemAt: ['$categoryInfo.name', 0] }, 'Uncategorized'] },
+          categoryId: { $arrayElemAt: ['$categoryInfo._id', 0] }
+        }
+      },
+      {
+        $project: {
+          categoryInfo: 0
+        }
+      },
+      { $sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 } },
+      { $skip: skip },
+      { $limit: limit }
+    ];
+    
+    // Count pipeline
+    const countPipeline = [
+      { $match: finalMatchStage },
+      { $count: 'total' }
+    ];
+    
+    const [products, countResult] = await Promise.all([
+      Product.aggregate(pipeline),
+      Product.aggregate(countPipeline)
     ]);
     
-    // Transform products to include category name
-    const transformedProducts = products.map(product => ({
-      ...product,
-      category: product.category?.name || 'Uncategorized',
-      categoryId: product.category?._id || null
-    }));
+    const totalCount = countResult[0]?.total || 0;
     
     return NextResponse.json({
       success: true,
-      products: transformedProducts,
+      products,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(totalCount / limit),

@@ -14,6 +14,8 @@ import {
 import toast from "react-hot-toast";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import EditProduct from "@/app/components/admin/product/Edit";
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -27,9 +29,43 @@ const Products = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
+  const router = useRouter();
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // In Products.jsx, add these states and functions
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const handleEditClick = (product) => {
+    setEditingProduct(product);
+    setShowEditModal(true);
+  };
+
+  const handleDeleteClick = async (productId, productName) => {
+    if (
+      confirm(
+        `Are you sure you want to delete "${productName}"? This action cannot be undone.`,
+      )
+    ) {
+      try {
+        const response = await fetch(`/api/v1/admin/products/${productId}`, {
+          method: "DELETE",
+        });
+        const data = await response.json();
+
+        if (data.success) {
+          toast.success("Product deleted successfully");
+          fetchProducts();
+        } else {
+          toast.error(data.message || "Failed to delete product");
+        }
+      } catch (error) {
+        console.error("Error deleting product:", error);
+        toast.error("Failed to delete product");
+      }
+    }
+  };
 
   // Fetch categories
   useEffect(() => {
@@ -119,7 +155,10 @@ const Products = () => {
               Manage your product catalog
             </p>
           </div>
-          <button className="bg-yellow-400 text-blue-900 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-yellow-300 transition-colors flex items-center gap-2 text-sm sm:text-base">
+          <button
+            onClick={() => router.push("/admin/dashboard/create-product")}
+            className="bg-yellow-400 text-blue-900 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-yellow-300 transition-colors flex items-center gap-2 text-sm sm:text-base"
+          >
             <FaPlus className="text-xs sm:text-sm" /> Add Product
           </button>
         </div>
@@ -272,14 +311,22 @@ const Products = () => {
                       </span>
                     </td>
                     <td className="px-3 sm:px-6 py-3 text-xs text-gray-500">
-                      {product.category || "-"}
+                      {product.categoryName || "-"}
                     </td>
                     <td className="px-3 sm:px-6 py-3">
                       <div className="flex gap-2">
-                        <button className="text-blue-600 hover:text-blue-800 transition-colors p-1">
+                        <button
+                          onClick={() => handleEditClick(product)}
+                          className="text-blue-600 hover:text-blue-800 transition-colors p-1"
+                        >
                           <FaEdit className="text-xs sm:text-sm" />
                         </button>
-                        <button className="text-red-600 hover:text-red-800 transition-colors p-1">
+                        <button
+                          onClick={() =>
+                            handleDeleteClick(product._id, product.name)
+                          }
+                          className="text-red-600 hover:text-red-800 transition-colors p-1"
+                        >
                           <FaTrash className="text-xs sm:text-sm" />
                         </button>
                       </div>
@@ -291,6 +338,21 @@ const Products = () => {
           </table>
         </div>
       </div>
+
+      {showEditModal && editingProduct && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <EditProduct
+              productId={editingProduct._id}
+              onBack={() => {
+                setShowEditModal(false);
+                setEditingProduct(null);
+                fetchProducts();
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Pagination */}
       {!loading && totalPages > 0 && (

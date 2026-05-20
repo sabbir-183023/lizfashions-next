@@ -23,6 +23,7 @@ import {
   FaEye,
   FaChevronDown,
   FaChevronUp,
+  FaTrash,
 } from "react-icons/fa";
 import { IoQrCode, IoCheckmarkCircle, IoBagCheck } from "react-icons/io5";
 import { GiDeliveryDrone } from "react-icons/gi";
@@ -50,7 +51,59 @@ const Orders = () => {
   const [hoveredProduct, setHoveredProduct] = useState(null);
   const itemsPerPage = 50;
 
-  console.log(orders);
+  // Add delete states at the top with other state declarations
+  const [deletingOrderId, setDeletingOrderId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Add delete handler function
+  const handleDeleteOrder = async (orderId, orderNumber) => {
+    if (
+      !confirm(
+        `Are you sure you want to delete order ${orderNumber}? This action cannot be undone and will restore inventory.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingOrderId(orderId);
+    setDeleting(true);
+
+    try {
+      const response = await fetch(`/api/v1/admin/orders/${orderId}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success("Order deleted successfully and inventory restored");
+        // Remove the order from local state
+        const updatedOrders = orders.filter((o) => o._id !== orderId);
+        setOrders(updatedOrders);
+        setFilteredOrders(
+          searchTerm
+            ? updatedOrders.filter(
+                (o) =>
+                  (o.customer?.name || o.buyer?.name)
+                    ?.toLowerCase()
+                    .includes(searchTerm.toLowerCase()) ||
+                  (o.customer?.phone || o.buyer?.phone)
+                    ?.toLowerCase()
+                    .includes(searchTerm.toLowerCase()),
+              )
+            : updatedOrders,
+        );
+        setTotalOrders(updatedOrders.length);
+      } else {
+        toast.error(data.message || "Failed to delete order");
+      }
+    } catch (error) {
+      console.error("Error deleting order:", error);
+      toast.error("Failed to delete order");
+    } finally {
+      setDeletingOrderId(null);
+      setDeleting(false);
+    }
+  };
 
   const statusOptions = [
     "Pending Confirmation",
@@ -315,7 +368,7 @@ const Orders = () => {
     printWindow.document.close();
   };
 
-  // Print Invoice - Fixed version with proper new tab and printing
+  // Print Invoice - Fixed version that keeps the tab open
   const handlePrintInvoice = (order) => {
     // Create a new tab
     const printTab = window.open();
@@ -486,7 +539,7 @@ const Orders = () => {
             <p><strong>Subtotal:</strong> Tk. ${order?.subTotal?.toFixed(2) || 0}</p>
             <p><strong>Delivery Charge:</strong> Tk. ${order?.deliveryCharge || 0}</p>
             ${order?.defaultDiscount > 0 ? `<p><strong>Default Discount:</strong> - Tk. ${order?.defaultDiscount}</p>` : ""}
-            ${order?.customDiscount ? `<p><strong>Custom Discount:</strong> - Tk. ${order?.customDiscount}</p>` : ""}
+            ${order?.customDiscount ? `<p><strong>Discount:</strong> - Tk. ${order?.customDiscount}</p>` : ""}
             <h3><strong>Grand Total:</strong> Tk. ${calculateTotal()}</h3>
           </div>
 
@@ -496,14 +549,12 @@ const Orders = () => {
           </div>
         </div>
         <script>
-          // Auto-print when page loads
+          // Auto-print when page loads - NO AUTO-CLOSE
           window.onload = function() {
             setTimeout(function() {
               window.print();
-              setTimeout(function() {
-                window.close();
-              }, 500);
-            }, 500);
+              // REMOVED: window.close() - tab stays open after printing
+            }, 1000);
           };
         </script>
       </body>
@@ -763,7 +814,7 @@ const Orders = () => {
                             value={trackingInput}
                             onChange={(e) => setTrackingInput(e.target.value)}
                             placeholder="Enter tracking ID"
-                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                            className="w-full px-3 text-gray-600 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                           />
                           <div className="flex gap-2">
                             <button
@@ -771,9 +822,11 @@ const Orders = () => {
                                 handleTrackingUpdate(order._id, trackingInput)
                               }
                               disabled={updatingOrderId === order._id}
-                              className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                              className="px-3 py-1 text-xs bg-green-600 disabled:bg-green-400 text-white rounded hover:bg-green-700 disabled:cursor-not-allowed"
                             >
-                              Save
+                              {updatingOrderId === order._id
+                                ? "Saving..."
+                                : "Save"}
                             </button>
                             <button
                               onClick={() => {
@@ -875,6 +928,20 @@ const Orders = () => {
                           className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-1"
                         >
                           <FaQrcode /> Label
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleDeleteOrder(order._id, order.lastNumber)
+                          }
+                          disabled={deletingOrderId === order._id}
+                          className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {deletingOrderId === order._id ? (
+                            <FaSpinner className="animate-spin text-xs" />
+                          ) : (
+                            <FaTrash className="text-xs" />
+                          )}
+                          Delete
                         </button>
                       </div>
                     </div>

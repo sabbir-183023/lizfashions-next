@@ -342,36 +342,40 @@ const CartPage = () => {
   };
 
   const handleApplyCoupon = async () => {
-    if (!couponCode) {
-      toast.error("কুপন কোড লিখুন");
-      return;
-    }
+  if (!couponCode) {
+    toast.error("কুপন কোড লিখুন");
+    return;
+  }
 
-    setIsApplyingCoupon(true);
-    try {
-      const res = await fetch("/api/v1/coupons/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: couponCode, total: subtotal }),
-      });
-      const data = await res.json();
+  setIsApplyingCoupon(true);
+  try {
+    const res = await fetch("/api/v1/coupons/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        code: couponCode, 
+        total: subtotal,
+        phone: customerInfo.phone // Add phone number for dedicated coupon validation
+      }),
+    });
+    const data = await res.json();
 
-      if (data.success) {
-        setCouponDiscount(data.discount);
-        setCouponMessage(`✅ ${data.message}`);
-         toast.success(data.message);
-      } else {
-        setCouponDiscount(0);
-        setCouponMessage(`❌ ${data.message}`);
-        toast.error(data.message);
-      }
-    } catch (error) {
-      setCouponMessage("❌ কুপন কোড যাচাই করতে সমস্যা হয়েছে");
-      toast.error("কুপন কোড যাচাই করতে সমস্যা হয়েছে");
-    } finally {
-      setIsApplyingCoupon(false);
+    if (data.success) {
+      setCouponDiscount(data.discount);
+      setCouponMessage(`✅ ${data.message}`);
+      toast.success(data.message);
+    } else {
+      setCouponDiscount(0);
+      setCouponMessage(`❌ ${data.message}`);
+      toast.error(data.message);
     }
-  };
+  } catch (error) {
+    setCouponMessage("❌ কুপন কোড যাচাই করতে সমস্যা হয়েছে");
+    toast.error("কুপন কোড যাচাই করতে সমস্যা হয়েছে");
+  } finally {
+    setIsApplyingCoupon(false);
+  }
+};
 
   const handlePlaceOrder = async () => {
     if (!validateForm()) return;

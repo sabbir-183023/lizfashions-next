@@ -2,67 +2,62 @@
 "use client";
 
 import React, { useState } from "react";
-import { 
-  FiDollarSign, 
-  FiList, 
-  FiBarChart2, 
+import {
+  FiDollarSign,
+  FiList,
+  FiBarChart2,
   FiFileText,
-  FiTrendingUp 
+  FiTrendingUp,
 } from "react-icons/fi";
-import Accounts from "./Accounts";
-import Overview from "./Overview";
-import Transactions from "./Transactions";
-import IncomeStatement from "./IncomeStatement";
-import LedgerView from "./LedgerView";
+import {
+  FaRegHandshake,
+  FaMoneyBillWave,
+  FaHandHoldingUsd,
+} from "react-icons/fa";
+import { MdMoneyOff } from "react-icons/md";
+import Sales from "./Sales";
+import Expense from "./Expense";
+import AccountsReceivable from "./AccountsReceivable";
+import AccountsPayable from "./AccountsPayable";
 
 const Accounting = () => {
-  const [currentSubMenu, setCurrentSubMenu] = useState("Overview");
+  const [currentSubMenu, setCurrentSubMenu] = useState("Sales");
   const [selectedAccountId, setSelectedAccountId] = useState(null);
-  
+
   const menuItems = [
-    { id: "Overview", label: "Overview", icon: <FiBarChart2 /> },
-    { id: "Accounts", label: "Accounts", icon: <FiList /> },
-    { id: "Transactions", label: "Transactions", icon: <FiDollarSign /> },
-    { id: "IncomeStatement", label: "Income Statement", icon: <FiFileText /> },
+    { id: "Sales", label: "Sales", icon: <FaRegHandshake /> },
+    { id: "Expense", label: "Expense", icon: <MdMoneyOff /> },
+    {
+      id: "AccountsReceivable",
+      label: "AccountsReceivable",
+      icon: <FaMoneyBillWave />,
+    },
+    {
+      id: "AccountsPayable",
+      label: "AccountsPayable",
+      icon: <FaHandHoldingUsd />,
+    },
   ];
 
-  const handleViewLedger = (accountId) => {
-    setSelectedAccountId(accountId);
-    setCurrentSubMenu("Ledger");
-  };
-
-  const handleBackFromLedger = () => {
-    setSelectedAccountId(null);
-    setCurrentSubMenu("Accounts");
-  };
-
-  // Add Ledger to menu items dynamically
   const displayMenuItems = [...menuItems];
-  if (selectedAccountId) {
-    displayMenuItems.unshift({ id: "Ledger", label: "Ledger View", icon: <FiTrendingUp /> });
-  }
 
   const renderContent = () => {
-    if (currentSubMenu === "Ledger" && selectedAccountId) {
-      return <LedgerView accountId={selectedAccountId} onBack={handleBackFromLedger} />;
-    }
-
     switch (currentSubMenu) {
-      case "Accounts":
-        return <Accounts onViewLedger={handleViewLedger} />;
-      case "Overview":
-        return <Overview />;
-      case "Transactions":
-        return <Transactions />;
-      case "IncomeStatement":
-        return <IncomeStatement />;
+      case "Sales":
+        return <Sales />;
+      case "Expense":
+        return <Expense />;
+      case "AccountsReceivable":
+        return <AccountsReceivable />;
+      case "AccountsPayable":
+        return <AccountsPayable />;
       default:
-        return <Overview />;
+        return <Sales />;
     }
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(120vh)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(150vh)] md:h-[calc(120vh)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -77,8 +72,7 @@ const Accounting = () => {
         </div>
       </div>
 
-      {/* Sub-menu Tabs - Only show if not in ledger view or show ledger tab */}
-      {(!selectedAccountId || currentSubMenu === "Ledger") && (
+      {!selectedAccountId && (
         <div className="border-b border-gray-200 px-4 sm:px-6 flex-shrink-0 overflow-x-auto">
           <div className="flex gap-1">
             {displayMenuItems.map((item) => (
@@ -100,9 +94,7 @@ const Accounting = () => {
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        {renderContent()}
-      </div>
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">{renderContent()}</div>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 // app/components/admin/services/CustomSales.jsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   FaSearch,
   FaPlus,
@@ -9,23 +9,21 @@ import {
   FaPrint,
   FaUser,
   FaPhone,
-  FaMapMarkerAlt,
-  FaCity,
   FaShoppingCart,
   FaTruck,
   FaTag,
   FaBarcode,
-  FaEye,
   FaTimes,
   FaSave,
   FaSpinner,
+  FaCamera,
 } from "react-icons/fa";
 import { IoQrCode } from "react-icons/io5";
 import toast from "react-hot-toast";
 import Image from "next/image";
 import Link from "next/link";
-import Select from "react-select";
 import JsBarcode from "jsbarcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 const CustomSales = () => {
   const [inventory, setInventory] = useState([]);
@@ -35,6 +33,13 @@ const CustomSales = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [barcodeProducts, setBarcodeProducts] = useState([]);
+  const [cameraError, setCameraError] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showCameraBarcodeModal, setShowCameraBarcodeModal] = useState(false);
+
+  const html5QrCodeRef = useRef(null);
+  const audioRef = useRef(null);
+  const isScanningRef = useRef(false);
 
   // Customer form data
   const [customerForm, setCustomerForm] = useState({
@@ -49,7 +54,7 @@ const CustomSales = () => {
   // Order summary
   const [deliveryCharge, setDeliveryCharge] = useState(0);
   const [discount, setDiscount] = useState(0);
-  const [discountType, setDiscountType] = useState("fixed"); // fixed or percentage
+  const [discountType, setDiscountType] = useState("fixed");
   const [notes, setNotes] = useState("");
 
   // Fetch inventory
@@ -59,7 +64,6 @@ const CustomSales = () => {
       const response = await fetch("/api/v1/admin/inventory");
       const data = await response.json();
       if (data.success) {
-        // Only show products with currentQty > 0
         const inStockItems = data.inventory.filter(
           (item) => item.currentQty > 0,
         );
@@ -77,7 +81,41 @@ const CustomSales = () => {
 
   useEffect(() => {
     fetchInventory();
+    // Create beep audio element
+    const audio = new Audio("/beep.mp3");
+    audioRef.current = audio;
+
+    return () => {
+      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+        html5QrCodeRef.current.stop().catch(console.error);
+      }
+    };
   }, []);
+
+  // Play beep sound
+  const playBeep = () => {
+    try {
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = 880;
+      gainNode.gain.value = 0.3;
+
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+        audioContext.close();
+      }, 200);
+    } catch (e) {
+      console.log("Audio not supported");
+    }
+  };
 
   // Filter inventory based on search
   const filteredInventory = inventory.filter(
@@ -172,20 +210,10 @@ const CustomSales = () => {
     setCustomerForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Validate customer form (only name and phone are required for admin custom orders)
+  // Validate customer form
   const validateCustomerForm = () => {
     if (!customerForm.name.trim()) {
       toast.error("Customer name is required");
-      return false;
-    }
-    if (!customerForm.phone.trim()) {
-      toast.error("Customer phone is required");
-      return false;
-    }
-    // Optional: phone validation
-    const phoneRegex = /^01[3-9]\d{8}$/;
-    if (!phoneRegex.test(customerForm.phone)) {
-      toast.error("Invalid phone number format. Use 01XXXXXXXXX");
       return false;
     }
     return true;
@@ -241,7 +269,6 @@ const CustomSales = () => {
 
       if (data.success) {
         toast.success("Custom order created successfully!");
-        // Reset form
         setSelectedProducts([]);
         setCustomerForm({
           name: "",
@@ -254,7 +281,6 @@ const CustomSales = () => {
         setDeliveryCharge(0);
         setDiscount(0);
         setNotes("");
-        // Refresh inventory
         fetchInventory();
       } else {
         toast.error(data.message || "Failed to create order");
@@ -266,6 +292,117 @@ const CustomSales = () => {
       setSubmitting(false);
     }
   };
+
+  // Barcode scanning functions
+  const startScanning = useCallback(async () => {
+    setCameraError(false);
+
+    try {
+      if (html5QrCodeRef.current) {
+        try {
+          await html5QrCodeRef.current.stop();
+        } catch (e) {
+          // Ignore stop errors
+        }
+      }
+
+      html5QrCodeRef.current = new Html5Qrcode("video-preview");
+
+      const config = {
+        fps: 30,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.CODABAR,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.PDF_417,
+          Html5QrcodeSupportedFormats.AZTEC,
+        ],
+      };
+
+      const qrCodeSuccessCallback = async (decodedText) => {
+        if (!isScanningRef.current) {
+          isScanningRef.current = true;
+          setIsScanning(true);
+
+          playBeep();
+
+          // Find product by barcode
+          const product = inventory.find((p) => p.barcode === decodedText);
+
+          if (product) {
+            addToOrder(product);
+            toast.success(`Scanned: ${product.productName}`);
+            // Close modal after successful scan
+            setShowCameraBarcodeModal(false);
+            stopScanning();
+          } else {
+            toast.error(`Product with barcode ${decodedText} not found`);
+          }
+
+          setTimeout(() => {
+            setIsScanning(false);
+            isScanningRef.current = false;
+          }, 1000);
+        }
+      };
+
+      const qrCodeErrorCallback = () => {
+        // Silent fail
+      };
+
+      await html5QrCodeRef.current.start(
+        { facingMode: "environment" },
+        config,
+        qrCodeSuccessCallback,
+        qrCodeErrorCallback,
+      );
+    } catch (error) {
+      console.error("Error starting camera:", error);
+      if (error.name === "NotAllowedError") {
+        toast.error("Camera permission denied. Please allow camera access.");
+      } else if (error.name === "NotFoundError") {
+        toast.error("No camera found on this device.");
+      } else {
+        toast.error("Failed to access camera. Please check permissions.");
+      }
+      setCameraError(true);
+    }
+  }, [inventory, addToOrder]);
+
+  const stopScanning = useCallback(async () => {
+    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+      try {
+        await html5QrCodeRef.current.stop();
+      } catch (error) {
+        console.error("Error stopping scanner:", error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showCameraBarcodeModal) {
+      setTimeout(() => {
+        startScanning();
+      }, 500);
+    } else {
+      stopScanning();
+    }
+
+    return () => {
+      stopScanning();
+    };
+  }, [showCameraBarcodeModal, startScanning, stopScanning]);
 
   // Barcode printing functions
   const generateBarcodeImage = (barcode) => {
@@ -287,7 +424,6 @@ const CustomSales = () => {
     return canvas.toDataURL("image/png");
   };
 
-  // Fixed Barcode printing function
   const handlePrintBarcodes = () => {
     if (barcodeProducts.length === 0) {
       toast.error("No products selected for barcode printing");
@@ -375,13 +511,9 @@ const CustomSales = () => {
             .join("")}
         </div>
         <script>
-          // Wait for all images to load before printing
           window.onload = function() {
-            // Small delay to ensure everything is rendered
             setTimeout(function() {
               window.print();
-              // Don't close immediately - let the user close after printing
-              // The window will stay open after print dialog closes
             }, 300);
           };
         </script>
@@ -393,7 +525,6 @@ const CustomSales = () => {
     printWindow.document.close();
   };
 
-  // Helper function to escape HTML
   const escapeHtml = (text) => {
     if (!text) return "";
     return text
@@ -418,7 +549,7 @@ const CustomSales = () => {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(150vh)] md:h-[calc(120vh)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(129vh)] md:h-[calc(90vh)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -445,7 +576,7 @@ const CustomSales = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Panel - Product Selection */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Search Products */}
+            {/* Search Products with Camera Icon */}
             <div className="bg-gray-50 rounded-lg p-4">
               <div className="relative">
                 <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
@@ -454,8 +585,15 @@ const CustomSales = () => {
                   placeholder="Search products by name or barcode..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                  className="w-full pl-9 pr-12 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                 />
+                <button
+                  onClick={() => setShowCameraBarcodeModal(true)}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-blue-600 transition-colors"
+                  title="Scan Barcode"
+                >
+                  <FaCamera className="text-lg" />
+                </button>
               </div>
             </div>
 
@@ -487,7 +625,6 @@ const CustomSales = () => {
                       className="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-start gap-3">
-                        {/* Product Info */}
                         <div className="flex-1">
                           <h4 className="text-sm font-semibold text-gray-800">
                             {product.productName}
@@ -598,9 +735,7 @@ const CustomSales = () => {
                 <h3 className="font-semibold text-gray-800 flex items-center gap-2">
                   <FaUser /> Customer Information
                 </h3>
-                <p className="text-xs text-gray-500">
-                  * Name and Phone are required
-                </p>
+                <p className="text-xs text-gray-500">* Name is required</p>
               </div>
 
               <div className="p-4 space-y-3">
@@ -620,7 +755,7 @@ const CustomSales = () => {
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Phone Number <span className="text-red-500">*</span>
+                    Phone Number
                   </label>
                   <input
                     type="tel"
@@ -700,7 +835,6 @@ const CustomSales = () => {
               </div>
 
               <div className="p-3 sm:p-4 space-y-3">
-                {/* Subtotal */}
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600 font-medium">Subtotal:</span>
                   <span className="font-semibold text-gray-800">
@@ -708,7 +842,6 @@ const CustomSales = () => {
                   </span>
                 </div>
 
-                {/* Delivery Charge */}
                 <div className="flex flex-col xs:flex-row justify-between items-start xs:items-center gap-2 text-sm">
                   <span className="text-gray-600 font-medium w-full xs:w-auto">
                     Delivery Charge:
@@ -723,12 +856,11 @@ const CustomSales = () => {
                       }
                       min="0"
                       step="10"
-                      className="flex-1 xs:w-28 px-2 py-1.5 text-gray-700 text-sm text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+                      className="flex-1 xs:w-28 px-2 py-1.5 text-gray-700 text-sm text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                     />
                   </div>
                 </div>
 
-                {/* Discount Section */}
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex flex-col xs:flex-row justify-between items-start xs:items-center gap-2 text-sm mb-2">
                     <span className="text-gray-600 font-medium">Discount:</span>
@@ -736,14 +868,10 @@ const CustomSales = () => {
                       <select
                         value={discountType}
                         onChange={(e) => setDiscountType(e.target.value)}
-                        className="flex-1 xs:flex-none px-2 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 bg-white"
+                        className="flex-1 xs:flex-none px-2 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg bg-white"
                       >
-                        <option value="fixed" className="text-gray-700">
-                          Fixed (৳)
-                        </option>
-                        <option value="percentage" className="text-gray-700">
-                          Percentage (%)
-                        </option>
+                        <option value="fixed">Fixed (৳)</option>
+                        <option value="percentage">Percentage (%)</option>
                       </select>
                       <div className="flex items-center gap-1 flex-1 xs:flex-none">
                         <input
@@ -754,7 +882,7 @@ const CustomSales = () => {
                           }
                           min="0"
                           step={discountType === "percentage" ? "1" : "10"}
-                          className="w-full xs:w-24 px-2 py-1.5 text-gray-700 text-sm text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                          className="w-full xs:w-24 px-2 py-1.5 text-gray-700 text-sm text-right border border-gray-300 rounded-lg"
                         />
                         {discountType === "percentage" && (
                           <span className="text-gray-500 text-sm">%</span>
@@ -772,7 +900,6 @@ const CustomSales = () => {
                   )}
                 </div>
 
-                {/* Grand Total */}
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-base font-bold text-gray-800">
@@ -784,7 +911,6 @@ const CustomSales = () => {
                   </div>
                 </div>
 
-                {/* Notes */}
                 <div className="pt-2">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     Notes (Optional)
@@ -794,15 +920,14 @@ const CustomSales = () => {
                     onChange={(e) => setNotes(e.target.value)}
                     rows="2"
                     placeholder="Additional notes for this order..."
-                    className="w-full px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-transparent resize-none"
+                    className="w-full px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400 resize-none"
                   />
                 </div>
 
-                {/* Submit Button */}
                 <button
                   onClick={handleSubmitOrder}
                   disabled={submitting || selectedProducts.length === 0}
-                  className="w-full bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 text-sm sm:text-base"
+                  className="w-full bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
                 >
                   {submitting ? (
                     <>
@@ -822,8 +947,129 @@ const CustomSales = () => {
         </div>
       </div>
 
+      {/* Camera Modal for Barcode Scanning */}
+      {showCameraBarcodeModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <FaCamera /> Scan Barcode
+              </h2>
+              <button
+                onClick={() => {
+                  setShowCameraBarcodeModal(false);
+                  stopScanning();
+                }}
+                className="text-white hover:text-gray-200"
+              >
+                <FaTimes className="text-xl" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="relative bg-black rounded-lg overflow-hidden mb-4">
+                <div
+                  id="video-preview"
+                  className="w-full h-auto"
+                  style={{
+                    minHeight: "300px",
+                    maxHeight: "400px",
+                    objectFit: "cover",
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
+                </div>
+              </div>
+
+              {cameraError && (
+                <div className="text-center mb-4">
+                  <button
+                    onClick={() => {
+                      setCameraError(false);
+                      startScanning();
+                    }}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  >
+                    Retry Camera
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowCameraBarcodeModal(false);
+                    stopScanning();
+                  }}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Or enter barcode manually:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="manual-barcode"
+                    placeholder="Enter barcode number"
+                    className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                    onKeyPress={(e) => {
+                      if (e.key === "Enter") {
+                        const product = inventory.find(
+                          (p) => p.barcode === e.target.value,
+                        );
+                        if (product) {
+                          addToOrder(product);
+                          setShowCameraBarcodeModal(false); // Change this
+                          stopScanning();
+                          input.value = "";
+                        } else {
+                          toast.error("Product not found");
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      const input = document.getElementById("manual-barcode");
+                      if (input.value) {
+                        const product = inventory.find(
+                          (p) => p.barcode === input.value,
+                        );
+                        if (product) {
+                          addToOrder(product);
+                          setShowBarcodeModal(false);
+                          stopScanning();
+                          input.value = "";
+                        } else {
+                          toast.error("Product not found");
+                        }
+                      }
+                    }}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {isScanning && (
+                <div className="mt-4 p-3 bg-blue-100 text-blue-700 rounded-lg text-center animate-pulse">
+                  🔍 Scanning... Position barcode in frame
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Barcode Print Modal */}
       {showBarcodeModal && (
+        // ... existing barcode modal code remains the same
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-gradient-to-r from-purple-900 to-purple-800 px-6 py-4 flex justify-between items-center">
@@ -901,7 +1147,6 @@ const CustomSales = () => {
                       </div>
                     ))}
                   </div>
-
                   <div className="flex gap-3">
                     <button
                       onClick={() => setBarcodeProducts([])}

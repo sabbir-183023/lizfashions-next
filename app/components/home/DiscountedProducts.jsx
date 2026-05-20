@@ -68,14 +68,14 @@ const DiscountedProducts = () => {
   };
 
   const ShimmerCard = () => (
-    <div className="bg-white rounded-2xl overflow-hidden shadow-lg animate-pulse">
-      <div className="relative h-80 w-full bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 shimmer"></div>
-      <div className="p-5 space-y-4">
-        <div className="h-6 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded shimmer w-3/4"></div>
-        <div className="h-4 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded shimmer w-1/2"></div>
+    <div className="bg-white rounded-xl overflow-hidden shadow-md animate-pulse">
+      <div className="relative h-48 sm:h-56 md:h-64 w-full bg-gray-200"></div>
+      <div className="p-3 sm:p-4 space-y-2">
+        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        <div className="h-3 bg-gray-200 rounded w-1/2"></div>
         <div className="flex justify-between items-center">
-          <div className="h-8 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded shimmer w-24"></div>
-          <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 rounded-full shimmer w-28"></div>
+          <div className="h-5 bg-gray-200 rounded w-20"></div>
+          <div className="h-7 bg-gray-200 rounded-full w-20"></div>
         </div>
       </div>
     </div>
@@ -83,16 +83,16 @@ const DiscountedProducts = () => {
 
   if (loading) {
     return (
-      <section className="py-16 bg-gradient-to-br from-[#0B1E33] to-[#1A2F4A]">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
+      <section className="py-8 sm:py-12 md:py-16 bg-gradient-to-br from-[#0B1E33] to-[#1A2F4A]">
+        <div className="container mx-auto px-3 sm:px-4">
+          <div className="text-center mb-6 sm:mb-8 md:mb-12">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2">
               Discounted <span className="text-[#FFD700]">Products</span>
             </h2>
-            <div className="w-24 h-1 bg-[#FFD700] mx-auto"></div>
+            <div className="w-16 sm:w-20 h-0.5 bg-[#FFD700] mx-auto"></div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
             {[1, 2, 3, 4].map((item) => (
               <ShimmerCard key={item} />
             ))}
@@ -103,61 +103,67 @@ const DiscountedProducts = () => {
   }
 
   return (
-    <section className="my-10 rounded-xl py-16 bg-gradient-to-br from-[#0B1E33] to-[#1A2F4A]">
-      <div className="container mx-auto px-4">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
+    <section className="my-6 sm:my-8 md:my-10 rounded-xl py-8 sm:py-12 md:py-16 bg-gradient-to-br from-[#0B1E33] to-[#1A2F4A]">
+      <div className="container mx-auto px-3 sm:px-4">
+        <div className="text-center mb-6 sm:mb-8 md:mb-12">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2">
             Discounted <span className="text-[#FFD700]">Products</span>
           </h2>
-          <div className="w-24 h-1 bg-[#FFD700] mx-auto mb-6"></div>
-          <p className="text-gray-300 max-w-2xl mx-auto">
-            Discover products that are on sale.
+          <div className="w-16 sm:w-20 h-0.5 bg-[#FFD700] mx-auto mb-3 sm:mb-4"></div>
+          <p className="text-gray-300 text-xs sm:text-sm max-w-2xl mx-auto px-4">
+            Discover products that are on sale with amazing discounts
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
           {products && products.length > 0 ? (
             products.map((product) => {
               const inCart = isInCart(product._id);
               const cartQuantity = getCartItemQuantity(product._id);
               const isAdding = addingToCart === product._id;
+              const discountPercent = product.originalPrice 
+                ? Math.round(((product.originalPrice - product.sellingPrice) / product.originalPrice) * 100)
+                : 0;
               
               return (
                 <div
                   key={product._id}
-                  className="group bg-white rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-500 hover:-translate-y-2 relative"
+                  className="group bg-white rounded-lg sm:rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 relative"
                 >
-                  {/* Cart Badge - Shows when item is in cart */}
-                  {inCart && (
-                    <div className="absolute top-4 left-4 z-10 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 shadow-lg">
-                      <FaCheck size={10} />
-                      <span>{cartQuantity} in cart</span>
+                  {/* Discount Badge */}
+                  {discountPercent > 0 && (
+                    <div className="absolute top-2 left-2 z-10 bg-red-500 text-white px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-bold shadow-lg">
+                      -{discountPercent}%
                     </div>
                   )}
 
-                  {/* Image Container with Link */}
+                  {/* Cart Badge */}
+                  {inCart && (
+                    <div className="absolute top-2 right-2 z-10 bg-green-500 text-white px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold flex items-center gap-0.5 shadow-lg">
+                      <FaCheck size={8} className="sm:w-2 sm:h-2" />
+                      <span>{cartQuantity}</span>
+                    </div>
+                  )}
+
+                  {/* Image Container */}
                   <Link href={`/product/${product?.slug}`}>
-                    <div className="relative h-80 w-full overflow-hidden bg-gray-100 cursor-pointer">
+                    <div className="relative h-40 sm:h-48 md:h-56 lg:h-64 w-full overflow-hidden bg-gray-100 cursor-pointer">
                       {product.photos && product.photos[0] && (
                         <>
                           <Image
                             src={product.photos[0].url}
                             alt={product.name}
                             fill
-                            className="object-cover group-hover:scale-110 transition-transform duration-700"
-                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                            className="object-cover group-hover:scale-110 transition-transform duration-500"
+                            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
                             quality={60}
                             loading="lazy"
-                            placeholder="blur"
-                            blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA8A/9k="
                           />
                           {/* Overlay with quick view button */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-[#0B1E33]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-                            <div className="absolute bottom-4 left-0 right-0 text-center">
+                          <div className="absolute inset-0 bg-gradient-to-t from-[#0B1E33]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <div className="absolute bottom-2 left-0 right-0 text-center">
                               <Link href={`/product/${product?.slug}`}>
-                                <button
-                                  className="bg-[#FFD700] text-[#0B1E33] px-6 py-2 rounded-full font-semibold hover:bg-white cursor-pointer transition-colors duration-300 transform hover:scale-105"
-                                >
+                                <button className="bg-[#FFD700] text-[#0B1E33] text-xs sm:text-sm px-3 sm:px-4 py-1 sm:py-1.5 rounded-full font-semibold hover:bg-white transition-colors duration-300">
                                   Quick View
                                 </button>
                               </Link>
@@ -169,7 +175,7 @@ const DiscountedProducts = () => {
                       {/* Color indicator */}
                       {product.colors && product.colors[0] && (
                         <div
-                          className="absolute top-4 right-4 w-8 h-8 rounded-full border-2 border-white shadow-lg"
+                          className="absolute top-2 right-2 w-5 h-5 sm:w-6 sm:h-6 rounded-full border border-white shadow-lg"
                           style={{ backgroundColor: product.colors[0] }}
                         ></div>
                       )}
@@ -177,59 +183,53 @@ const DiscountedProducts = () => {
                   </Link>
 
                   {/* Product Info */}
-                  <div className="p-5">
+                  <div className="p-2 sm:p-3 md:p-4">
                     <Link href={`/product/${product?.slug}`}>
-                      <h3 className="text-lg font-bold text-[#0B1E33] mb-2 line-clamp-2 min-h-[56px] hover:text-[#FFD700] transition-colors cursor-pointer">
+                      <h3 className="text-xs sm:text-sm md:text-base font-semibold text-[#0B1E33] mb-1 line-clamp-2 min-h-[32px] sm:min-h-[40px] hover:text-[#FFD700] transition-colors cursor-pointer">
                         {product.name}
                       </h3>
                     </Link>
 
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-2xl font-bold text-[#1A2F4A]">
+                    <div className="flex items-center justify-between mb-1 sm:mb-2">
+                      <span className="text-sm sm:text-base md:text-lg font-bold text-[#1A2F4A]">
                         ৳{product.sellingPrice}
                       </span>
                       {product.originalPrice && (
-                        <span className="text-sm text-red-500 line-through">
+                        <span className="text-[10px] sm:text-xs text-gray-400 line-through">
                           ৳{product.originalPrice}
                         </span>
                       )}
                     </div>
 
-                    {/* Discount Badge */}
-                    {product.originalPrice && (
-                      <div className="mb-3">
-                        <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
-                          Save {Math.round(((product.originalPrice - product.sellingPrice) / product.originalPrice) * 100)}%
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-sm mb-4">
-                      <span className="text-gray-500">SKU: {product.SKU}</span>
+                    {/* SKU and Stock Status - Hidden on very small screens */}
+                    <div className="hidden sm:flex items-center justify-between text-[10px] sm:text-xs mb-2 sm:mb-3">
+                      <span className="text-gray-500 truncate max-w-[80px]">
+                        SKU: {product.SKU}
+                      </span>
                       <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-xs font-semibold ${
                           product.quantity > 0
                             ? "bg-green-100 text-green-700"
                             : "bg-red-100 text-red-700"
                         }`}
                       >
-                        {product.quantity > 0 ? "In Stock" : "Out of Stock"}
+                        {product.quantity > 0 ? "In Stock" : "Out"}
                       </span>
                     </div>
 
-                    {/* Add to Cart Button with multiple states */}
+                    {/* Add to Cart Button */}
                     {product.quantity > 0 ? (
                       inCart ? (
-                        <div className="space-y-2">
+                        <div className="space-y-1 sm:space-y-2">
                           <button
-                            className="w-full py-3 rounded-xl font-semibold bg-green-600 text-white hover:bg-green-700 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
+                            className="w-full py-1.5 sm:py-2 rounded-lg font-semibold bg-green-600 text-white text-xs sm:text-sm flex items-center justify-center gap-1 cursor-default"
                             disabled
                           >
-                            <FaCheck />
-                            Added to Cart
+                            <FaCheck size={10} className="sm:w-3 sm:h-3" />
+                            Added
                           </button>
                           <Link href="/cart" onClick={(e) => e.stopPropagation()}>
-                            <button className="w-full py-2 rounded-xl font-semibold bg-[#FFD700] text-[#0B1E33] hover:bg-[#FFD700]/90 transition-all duration-300 text-sm cursor-pointer">
+                            <button className="w-full py-1 sm:py-1.5 rounded-lg font-semibold bg-[#FFD700] text-[#0B1E33] text-[10px] sm:text-xs hover:bg-[#FFD700]/90 transition-all duration-300 cursor-pointer">
                               View Cart ({cartQuantity})
                             </button>
                           </Link>
@@ -238,7 +238,7 @@ const DiscountedProducts = () => {
                         <button
                           onClick={(e) => handleAddToCart(product, e)}
                           disabled={isAdding}
-                          className={`w-full py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                          className={`w-full py-1.5 sm:py-2 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-300 flex items-center justify-center gap-1 cursor-pointer ${
                             isAdding
                               ? "bg-gray-400 cursor-not-allowed"
                               : "bg-[#0B1E33] text-white hover:bg-[#FFD700] hover:text-[#0B1E33]"
@@ -246,84 +246,45 @@ const DiscountedProducts = () => {
                         >
                           {isAdding ? (
                             <>
-                              <FaSpinner className="animate-spin" />
-                              Adding...
+                              <FaSpinner className="animate-spin w-2 h-2 sm:w-3 sm:h-3" />
+                              <span>Adding...</span>
                             </>
                           ) : (
                             <>
-                              <FaShoppingCart />
-                              Add to Cart
+                              <FaShoppingCart className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                              <span>Add</span>
                             </>
                           )}
                         </button>
                       )
                     ) : (
                       <button
-                        className="w-full py-3 rounded-xl font-semibold bg-gray-300 text-gray-500 cursor-not-allowed"
+                        className="w-full py-1.5 sm:py-2 rounded-lg font-semibold bg-gray-300 text-gray-500 text-xs sm:text-sm cursor-not-allowed"
                         disabled
                       >
                         Sold Out
                       </button>
-                    )}
-
-                    {inCart && (
-                      <div className="mt-2 text-xs text-gray-500 text-center">
-                        Click View Cart to manage quantity
-                      </div>
                     )}
                   </div>
                 </div>
               );
             })
           ) : (
-            <div className="col-span-full text-center text-white py-12">
-              <p>No discounted products available at the moment.</p>
+            <div className="col-span-full text-center text-white py-8 sm:py-12">
+              <p className="text-sm sm:text-base">No discounted products available at the moment.</p>
             </div>
           )}
         </div>
 
-        <div className="text-center mt-12">
+        {/* View All Button */}
+        <div className="text-center mt-8 sm:mt-10 md:mt-12">
           <Link href={"/products"}>
-            <button className="bg-transparent border-2 border-[#FFD700] text-[#FFD700] px-8 py-3 rounded-full font-semibold hover:bg-[#FFD700] hover:text-[#0B1E33] transition-all duration-300 transform hover:scale-105 cursor-pointer">
+            <button className="bg-transparent border border-[#FFD700] text-[#FFD700] px-5 sm:px-6 md:px-8 py-2 sm:py-2.5 rounded-full text-sm sm:text-base font-semibold hover:bg-[#FFD700] hover:text-[#0B1E33] transition-all duration-300 cursor-pointer">
               View All Products
             </button>
           </Link>
         </div>
       </div>
-
-      <style>
-        {`
-          @keyframes shimmer {
-            0% {
-              transform: translateX(-100%);
-            }
-            100% {
-              transform: translateX(100%);
-            }
-          }
-
-          .shimmer {
-            position: relative;
-            overflow: hidden;
-          }
-
-          .shimmer::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(
-              90deg,
-              transparent,
-              rgba(255, 255, 255, 0.4),
-              transparent
-            );
-            animation: shimmer 1.5s infinite;
-          }
-        `}
-      </style>
     </section>
   );
 };

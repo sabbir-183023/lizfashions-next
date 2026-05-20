@@ -119,6 +119,14 @@ const Footer = () => {
               </li>
               <li>
                 <Link
+                  href="/blogs"
+                  className="text-gray-300 hover:text-yellow-400 transition-colors duration-300 flex items-center gap-2"
+                >
+                  <span className="text-yellow-400">›</span> Blogs
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/faq"
                   className="text-gray-300 hover:text-yellow-400 transition-colors duration-300 flex items-center gap-2"
                 >
@@ -199,19 +207,19 @@ const Footer = () => {
               <li className="flex items-center gap-3 text-gray-300">
                 <FaPhone className="text-yellow-400" />
                 <a
-                  href="tel:+8801234567890"
+                  href="tel:+8801303934257"
                   className="hover:text-yellow-400 transition-colors"
                 >
-                  +880 1234 567890
+                  +880 1303 934257
                 </a>
               </li>
               <li className="flex items-center gap-3 text-gray-300">
                 <FaEnvelope className="text-yellow-400" />
                 <a
-                  href="mailto:info@lizfashions.com"
+                  href="mailto:lizfashions2024@gmail.com"
                   className="hover:text-yellow-400 transition-colors break-all"
                 >
-                  info@lizfashions.com
+                  lizfashions2024@gmail.com
                 </a>
               </li>
             </ul>
