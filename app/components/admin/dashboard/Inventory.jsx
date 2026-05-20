@@ -1,7 +1,7 @@
 // app/admin/dashboard/components/Inventory.jsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   FaWarehouse,
   FaExclamationTriangle,
@@ -18,8 +18,11 @@ import {
   FaBox,
   FaBoxOpen,
   FaTag,
+  FaCamera,
+  FaSpinner,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 const Inventory = () => {
   const [inventory, setInventory] = useState([]);
@@ -28,14 +31,20 @@ const Inventory = () => {
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
 
-  console.log(filteredInventory);
-
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [stockStatus, setStockStatus] = useState("");
   const [productStatus, setProductStatus] = useState("");
   const [submitLoading, setSubmitLoading] = useState(false);
+
+  // Barcode scanner states
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const html5QrCodeRef = useRef(null);
+  const audioRef = useRef(null);
+  const isScanningRef = useRef(false);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,6 +95,15 @@ const Inventory = () => {
     products,
   ]);
 
+  // Clean up scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+        html5QrCodeRef.current.stop().catch(console.error);
+      }
+    };
+  }, []);
+
   const fetchCategories = async () => {
     try {
       const response = await fetch("/api/v1/categories");
@@ -117,15 +135,8 @@ const Inventory = () => {
       const data = await response.json();
 
       if (data.success) {
-        // Use the API's matching results directly - DON'T re-match on client
-        console.log("📊 API Stats:", data.stats);
-        console.log("📊 Sample item:", data.inventory[0]);
-
-        // The API already provides isLinkedToProduct flag
         setInventory(data.inventory);
         calculateStats(data.inventory);
-
-        // Update stats from API response for accuracy
         if (data.stats) {
           setStats((prev) => ({
             ...prev,
@@ -209,6 +220,141 @@ const Inventory = () => {
     setStockStatus("");
     setProductStatus("");
   };
+
+  // Play beep sound
+  const playBeep = () => {
+    try {
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = 880;
+      gainNode.gain.value = 0.3;
+
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+        audioContext.close();
+      }, 200);
+    } catch (e) {
+      console.log("Audio not supported");
+    }
+  };
+
+  // Barcode scanning functions
+  const startScanning = useCallback(async () => {
+    setCameraError(false);
+
+    try {
+      if (html5QrCodeRef.current) {
+        try {
+          await html5QrCodeRef.current.stop();
+        } catch (e) {
+          // Ignore stop errors
+        }
+      }
+
+      html5QrCodeRef.current = new Html5Qrcode("video-preview");
+
+      const config = {
+        fps: 30,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.CODABAR,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.PDF_417,
+          Html5QrcodeSupportedFormats.AZTEC,
+        ],
+      };
+
+      const qrCodeSuccessCallback = async (decodedText) => {
+        if (!isScanningRef.current) {
+          isScanningRef.current = true;
+          setIsScanning(true);
+
+          playBeep();
+
+          // Find product by barcode
+          const product = inventory.find((p) => p.barcode === decodedText);
+
+          if (product) {
+            setSearchTerm(decodedText);
+            toast.success(`Found: ${product.productName}`);
+            setShowCameraModal(false);
+            stopScanning();
+          } else {
+            toast.error(`Product with barcode ${decodedText} not found`);
+          }
+
+          setTimeout(() => {
+            setIsScanning(false);
+            isScanningRef.current = false;
+          }, 1000);
+        }
+      };
+
+      const qrCodeErrorCallback = () => {
+        // Silent fail
+      };
+
+      await html5QrCodeRef.current.start(
+        { facingMode: "environment" },
+        config,
+        qrCodeSuccessCallback,
+        qrCodeErrorCallback,
+      );
+    } catch (error) {
+      console.error("Error starting camera:", error);
+      if (error.name === "NotAllowedError") {
+        toast.error("Camera permission denied. Please allow camera access.");
+      } else if (error.name === "NotFoundError") {
+        toast.error("No camera found on this device.");
+      } else {
+        toast.error("Failed to access camera. Please check permissions.");
+      }
+      setCameraError(true);
+    }
+  }, [inventory]);
+
+  const stopScanning = useCallback(async () => {
+    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+      try {
+        await html5QrCodeRef.current.stop();
+      } catch (error) {
+        console.error("Error stopping scanner:", error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showCameraModal) {
+      setTimeout(() => {
+        startScanning();
+      }, 500);
+    } else {
+      stopScanning();
+    }
+
+    return () => {
+      stopScanning();
+    };
+  }, [showCameraModal, startScanning, stopScanning]);
 
   const handleAddClick = () => {
     setEditingItem(null);
@@ -422,7 +568,7 @@ const Inventory = () => {
             <p>Uploaded as Product: ${uploadedCount} | Not Uploaded: ${notUploadedCount}</p>
           </div>
           
-          <table>
+          <tr>
             <thead>
               <tr>
                 <th>Date</th>
@@ -609,8 +755,15 @@ const Inventory = () => {
               placeholder="Search by product name or barcode..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+              className="w-full pl-9 pr-12 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
             />
+            <button
+              onClick={() => setShowCameraModal(true)}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-blue-600 transition-colors"
+              title="Scan Barcode"
+            >
+              <FaCamera className="text-lg" />
+            </button>
           </div>
 
           <div className="sm:w-48 relative">
@@ -827,6 +980,129 @@ const Inventory = () => {
         </div>
       </div>
 
+      {/* Camera Modal for Barcode Scanning */}
+      {showCameraModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <FaCamera /> Scan Barcode
+              </h2>
+              <button
+                onClick={() => {
+                  setShowCameraModal(false);
+                  stopScanning();
+                }}
+                className="text-white hover:text-gray-200"
+              >
+                <FaTimes className="text-xl" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="relative bg-black rounded-lg overflow-hidden mb-4">
+                <div
+                  id="video-preview"
+                  className="w-full h-auto"
+                  style={{
+                    minHeight: "300px",
+                    maxHeight: "400px",
+                    objectFit: "cover",
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
+                </div>
+              </div>
+
+              {cameraError && (
+                <div className="text-center mb-4">
+                  <button
+                    onClick={() => {
+                      setCameraError(false);
+                      startScanning();
+                    }}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  >
+                    Retry Camera
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowCameraModal(false);
+                    stopScanning();
+                  }}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Or enter barcode manually:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="manual-barcode"
+                    placeholder="Enter barcode number"
+                    className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
+                    onKeyPress={(e) => {
+                      if (e.key === "Enter") {
+                        const product = inventory.find(
+                          (p) => p.barcode === e.target.value,
+                        );
+                        if (product) {
+                          setSearchTerm(e.target.value);
+                          toast.success(`Found: ${product.productName}`);
+                          setShowCameraModal(false);
+                          stopScanning();
+                          input.value = "";
+                        } else {
+                          toast.error("Product not found");
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      const input = document.getElementById("manual-barcode");
+                      if (input.value) {
+                        const product = inventory.find(
+                          (p) => p.barcode === input.value,
+                        );
+                        if (product) {
+                          setSearchTerm(input.value);
+                          toast.success(`Found: ${product.productName}`);
+                          setShowCameraModal(false);
+                          stopScanning();
+                          input.value = "";
+                        } else {
+                          toast.error("Product not found");
+                        }
+                      }
+                    }}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {isScanning && (
+                <div className="mt-4 p-3 bg-blue-100 text-blue-700 rounded-lg text-center animate-pulse">
+                  🔍 Scanning... Position barcode in frame
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -845,6 +1121,7 @@ const Inventory = () => {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Form fields remain the same as before */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Date *

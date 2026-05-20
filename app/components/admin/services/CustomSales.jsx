@@ -342,7 +342,6 @@ const CustomSales = () => {
 
           if (product) {
             addToOrder(product);
-            toast.success(`Scanned: ${product.productName}`);
             // Close modal after successful scan
             setShowCameraBarcodeModal(false);
             stopScanning();
