@@ -505,7 +505,7 @@ const InventoryCount = () => {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(100vh-120px)]">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-[calc(129vh)] md:h-[calc(90vh)]">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-4 sm:px-6 py-4 sm:py-6 flex-shrink-0">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
