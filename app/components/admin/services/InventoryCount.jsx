@@ -13,6 +13,7 @@ import {
   FaTrash,
   FaPlus,
   FaMinus,
+  FaExclamationTriangle,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -21,6 +22,7 @@ const InventoryCount = () => {
   const [onlineProducts, setOnlineProducts] = useState([]);
   const [filteredOnlineProducts, setFilteredOnlineProducts] = useState([]);
   const [offlineProducts, setOfflineProducts] = useState([]);
+  const [discrepancyProducts, setDiscrepancyProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [showCamera, setShowCamera] = useState(false);
@@ -74,7 +76,9 @@ const InventoryCount = () => {
   // Play beep sound
   const playBeep = () => {
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
 
@@ -104,6 +108,15 @@ const InventoryCount = () => {
     setFilteredOnlineProducts(filtered);
   }, [searchTerm, onlineProducts]);
 
+  // Update discrepancy products whenever offline products change
+  useEffect(() => {
+    const discrepancies = offlineProducts.filter(
+      (offline) => offline.countedQuantity > offline.currentQty,
+    );
+    setDiscrepancyProducts(discrepancies);
+    // REMOVED the toast.error from here - only show warning when actually adding
+  }, [offlineProducts]);
+
   // Add product to offline list
   const addToOffline = (product, quantity = 1) => {
     const existingOffline = offlineProducts.find(
@@ -112,10 +125,6 @@ const InventoryCount = () => {
 
     if (existingOffline) {
       const newQuantity = existingOffline.countedQuantity + quantity;
-      if (newQuantity > product.currentQty) {
-        toast.error(`Cannot exceed available stock (${product.currentQty})`);
-        return false;
-      }
       setOfflineProducts((prev) =>
         prev.map((p) =>
           p.barcode === product.barcode
@@ -124,10 +133,6 @@ const InventoryCount = () => {
         ),
       );
     } else {
-      if (quantity > product.currentQty) {
-        toast.error(`Cannot exceed available stock (${product.currentQty})`);
-        return false;
-      }
       setOfflineProducts((prev) => [
         ...prev,
         {
@@ -150,10 +155,27 @@ const InventoryCount = () => {
     );
 
     playBeep();
-    toast.success(`${product.productName} added to offline count`);
+
+    const newTotal = (existingOffline?.countedQuantity || 0) + quantity;
+
+    // Clear any pending toast timeout
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    // Show warning only when actually exceeding
+    if (newTotal > product.currentQty) {
+      toastTimeoutRef.current = setTimeout(() => {
+        toast.warning(
+          `⚠️ ${product.productName}: Counted ${newTotal} but online shows ${product.currentQty}. This will be marked as discrepancy!`,
+          { duration: 3000 },
+        );
+      }, 100);
+    } else {
+      toast.success(`${product.productName} added to offline count`);
+    }
     return true;
   };
-
   // Remove from offline list
   const removeFromOffline = (barcode) => {
     const product = offlineProducts.find((p) => p.barcode === barcode);
@@ -179,13 +201,6 @@ const InventoryCount = () => {
       return;
     }
 
-    if (newQuantity > onlineProduct.currentQty) {
-      toast.error(
-        `Cannot exceed available stock (${onlineProduct.currentQty})`,
-      );
-      return;
-    }
-
     setOfflineProducts((prev) =>
       prev.map((p) =>
         p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
@@ -197,6 +212,23 @@ const InventoryCount = () => {
         p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
       ),
     );
+
+    // Clear any pending toast timeout
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    // Show warning only when exceeding online quantity
+    if (newQuantity > onlineProduct.currentQty) {
+      toastTimeoutRef.current = setTimeout(() => {
+        toast.warning(
+          `⚠️ ${onlineProduct.productName}: Counted ${newQuantity} but online shows ${onlineProduct.currentQty}`,
+          { duration: 3000 },
+        );
+      }, 100);
+    } else if (newQuantity === onlineProduct.currentQty) {
+      toast.success(`${onlineProduct.productName} fully counted!`);
+    }
   };
 
   // Handle barcode scan - Keep camera open
@@ -206,20 +238,15 @@ const InventoryCount = () => {
 
       isScanningRef.current = true;
       setScanning(true);
-      
+
       const product = onlineProducts.find((p) => p.barcode === barcodeValue);
 
       if (product) {
-        if (product.countedQuantity >= product.currentQty) {
-          toast.error(`All stock of ${product.productName} has been counted`);
-          setLastScannedProduct(null);
-        } else {
-          addToOffline(product, 1);
-          setScannedBarcode(barcodeValue);
-          setLastScannedProduct(product);
-          setTimeout(() => setScannedBarcode(""), 2000);
-          setTimeout(() => setLastScannedProduct(null), 3000);
-        }
+        addToOffline(product, 1);
+        setScannedBarcode(barcodeValue);
+        setLastScannedProduct(product);
+        setTimeout(() => setScannedBarcode(""), 2000);
+        setTimeout(() => setLastScannedProduct(null), 3000);
       } else {
         toast.error(`Product with barcode ${barcodeValue} not found`);
         setScannedBarcode("");
@@ -231,15 +258,14 @@ const InventoryCount = () => {
         isScanningRef.current = false;
       }, 1500);
     },
-    [onlineProducts, scanning],
+    [onlineProducts],
   );
 
   // Start barcode scanning with Html5Qrcode
   const startScanning = useCallback(async () => {
     setCameraError(false);
-    
+
     try {
-      // Clean up existing scanner
       if (html5QrCodeRef.current) {
         try {
           await html5QrCodeRef.current.stop();
@@ -248,9 +274,8 @@ const InventoryCount = () => {
         }
       }
 
-      // Create new scanner with enhanced config
       html5QrCodeRef.current = new Html5Qrcode("video-preview");
-      
+
       const config = {
         fps: 30,
         qrbox: { width: 250, height: 250 },
@@ -287,9 +312,8 @@ const InventoryCount = () => {
         { facingMode: "environment" },
         config,
         qrCodeSuccessCallback,
-        qrCodeErrorCallback
+        qrCodeErrorCallback,
       );
-      
     } catch (error) {
       console.error("Error starting camera:", error);
       if (error.name === "NotAllowedError") {
@@ -331,16 +355,11 @@ const InventoryCount = () => {
     };
   }, [showCamera, startScanning, stopScanning]);
 
-  // Print missing products
+  // Print missing products and discrepancies
   const handlePrintMissing = () => {
     const missingProducts = onlineProducts.filter(
       (p) => !p.counted || p.countedQuantity < p.currentQty,
     );
-
-    if (missingProducts.length === 0) {
-      toast.success("All products have been counted!");
-      return;
-    }
 
     const printWindow = window.open("", "_blank");
 
@@ -348,7 +367,7 @@ const InventoryCount = () => {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Missing Products Report</title>
+          <title>Inventory Count Report</title>
           <style>
             body {
               font-family: Arial, sans-serif;
@@ -382,6 +401,11 @@ const InventoryCount = () => {
             .text-right {
               text-align: right;
             }
+            .discrepancy {
+              background-color: #ffeb3b;
+              color: #d32f2f;
+              font-weight: bold;
+            }
             .missing-badge {
               color: #dc2626;
               font-weight: bold;
@@ -396,11 +420,56 @@ const InventoryCount = () => {
         </head>
         <body>
           <div class="header">
-            <h1>Missing Products Report</h1>
-            <p>Products that are online but not yet counted offline</p>
+            <h1>Inventory Count Report</h1>
             <p>Date: ${new Date().toLocaleString()}</p>
           </div>
           
+          <h2>📊 Summary</h2>
+          <tr>
+            <tr><td>Total Online Products:</td><td class="text-right">${onlineProducts.length}</td></tr>
+            <tr><td>Total Counted Items:</td><td class="text-right">${offlineProducts.reduce((s, p) => s + p.countedQuantity, 0)}</td></tr>
+            <tr class="discrepancy"><td>⚠️ Discrepancies Found:</td><td class="text-right">${discrepancyProducts.length}</td></tr>
+          </table>
+          
+          ${
+            discrepancyProducts.length > 0
+              ? `
+            <h2>⚠️ Discrepancy Report (Counted > Online Stock)</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Product Name</th>
+                  <th>Barcode</th>
+                  <th>Category</th>
+                  <th>Online Qty</th>
+                  <th>Counted Qty</th>
+                  <th>Difference</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${discrepancyProducts
+                  .map(
+                    (product, idx) => `
+                  <tr class="discrepancy">
+                    <td>${idx + 1}</td>
+                    <td>${product.productName}</td>
+                    <td>${product.barcode || "-"}</td>
+                    <td>${product.categoryName}</td>
+                    <td class="text-right">${product.currentQty}</td>
+                    <td class="text-right">${product.countedQuantity}</td>
+                    <td class="text-right">+${product.countedQuantity - product.currentQty}</td>
+                  </tr>
+                `,
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          `
+              : ""
+          }
+          
+          <h2>📋 Products Not Counted</h2>
           <table>
             <thead>
               <tr>
@@ -430,12 +499,6 @@ const InventoryCount = () => {
                 )
                 .join("")}
             </tbody>
-            <tfoot>
-              <tr class="missing-badge">
-                <td colspan="6" class="text-right"><strong>Total Missing Products:</strong></td>
-                <td class="text-right"><strong>${missingProducts.length}</strong></td>
-              </tr>
-            </tfoot>
           </table>
           
           <div class="footer">
@@ -467,14 +530,48 @@ const InventoryCount = () => {
               Count offline inventory and compare with online records
             </p>
           </div>
-          <button
-            onClick={handlePrintMissing}
-            className="bg-red-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center gap-2 text-sm sm:text-base"
-          >
-            <FaPrint /> Print Missing Products
-          </button>
+          <div className="flex gap-2">
+            {discrepancyProducts.length > 0 && (
+              <div className="bg-red-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
+                <FaExclamationTriangle />
+                <span>{discrepancyProducts.length} Discrepancies</span>
+              </div>
+            )}
+            <button
+              onClick={handlePrintMissing}
+              className="bg-red-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors flex items-center gap-2 text-sm sm:text-base"
+            >
+              <FaPrint /> Print Report
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Discrepancy Alert Banner */}
+      {discrepancyProducts.length > 0 && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 m-4 rounded">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <FaExclamationTriangle className="h-5 w-5 text-yellow-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-yellow-700">
+                <span className="font-bold">
+                  ⚠️ Inventory Discrepancy Detected!
+                </span>
+                <br />
+                {discrepancyProducts.length} product(s) have been counted more
+                than what's in the system. Total excess: +
+                {discrepancyProducts.reduce(
+                  (sum, p) => sum + (p.countedQuantity - p.currentQty),
+                  0,
+                )}{" "}
+                units. Please verify these items.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="block md:flex-1 p-4 sm:p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -499,13 +596,16 @@ const InventoryCount = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto overflow-y-auto flex-1">
+            <div
+              className="overflow-x-auto flex-1"
+              style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}
+            >
               {loading ? (
                 <div className="flex justify-center items-center py-12">
                   <FaSpinner className="animate-spin text-3xl text-yellow-500" />
                 </div>
               ) : (
-                <div className="relative">
+                <div className="relative h-full">
                   <div className="sticky top-0 bg-white p-2 border-b">
                     <div className="relative">
                       <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm" />
@@ -521,53 +621,92 @@ const InventoryCount = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Online Qty</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                          Product
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">
+                          Barcode
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                          Online Qty
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                          Counted
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">
+                          Action
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {filteredOnlineProducts.map((product) => (
-                        <tr key={product._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3">
-                            <div>
-                              <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                              <p className="text-xs text-gray-500">{product.categoryName}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                            {product.barcode || "-"}
-                          </td>
-                          <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
-                            {product.currentQty}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`text-sm font-semibold ${product.counted ? "text-green-600" : "text-red-500"}`}>
-                              {product.countedQuantity || 0}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            {!product.counted || product.countedQuantity < product.currentQty ? (
-                              <button
-                                onClick={() => addToOffline(product, 1)}
-                                className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
-                                disabled={product.countedQuantity >= product.currentQty}
+                      {filteredOnlineProducts.map((product) => {
+                        const offlineItem = offlineProducts.find(
+                          (p) => p.barcode === product.barcode,
+                        );
+                        const isDiscrepancy =
+                          offlineItem &&
+                          offlineItem.countedQuantity > product.currentQty;
+
+                        return (
+                          <tr
+                            key={product._id}
+                            className={`overfloy-y-auto hover:bg-gray-50 ${isDiscrepancy ? "bg-yellow-50" : ""}`}
+                          >
+                            <td className="px-4 py-3">
+                              <div>
+                                <p className="text-xs font-medium text-gray-800">
+                                  {product.productName}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {product.categoryName}
+                                </p>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500 font-mono">
+                              {product.barcode || "-"}
+                            </td>
+                            <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
+                              {product.currentQty}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span
+                                className={`text-sm font-semibold ${isDiscrepancy ? "text-red-600" : product.counted ? "text-green-600" : "text-red-500"}`}
                               >
-                                + Add
-                              </button>
-                            ) : (
-                              <span className="text-green-600 text-xs flex items-center gap-1">
-                                <FaCheckCircle /> Complete
+                                {product.countedQuantity || 0}
+                                {isDiscrepancy && (
+                                  <FaExclamationTriangle className="inline ml-1 text-xs text-red-500" />
+                                )}
                               </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {!product.counted ||
+                              product.countedQuantity < product.currentQty ? (
+                                <button
+                                  onClick={() => addToOffline(product, 1)}
+                                  className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
+                                >
+                                  +
+                                </button>
+                              ) : product.countedQuantity ===
+                                product.currentQty ? (
+                                <span className="text-green-600 text-xs flex items-center gap-1">
+                                  <FaCheckCircle /> Complete
+                                </span>
+                              ) : (
+                                <span className="text-red-600 text-xs flex items-center gap-1">
+                                  <FaExclamationTriangle /> Excess
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {filteredOnlineProducts.length === 0 && (
                         <tr>
-                          <td colSpan="5" className="text-center py-8 text-gray-500">
+                          <td
+                            colSpan="5"
+                            className="text-center py-8 text-gray-500"
+                          >
                             No products found
                           </td>
                         </tr>
@@ -582,88 +721,179 @@ const InventoryCount = () => {
           {/* Offline Products Table */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-[50vh] md:h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-              <h3 className="font-semibold text-green-600 flex items-center gap-2">
-                <FaCheckCircle className="text-green-500" /> Offline Counted Products
-              </h3>
-              <p className="text-xs text-gray-500">
-                Products marked as counted offline ({offlineProducts.length} items)
-              </p>
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="font-semibold text-green-600 flex items-center gap-2">
+                    <FaCheckCircle className="text-green-500" /> Offline Counted
+                    Products
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Products marked as counted offline ({offlineProducts.length}{" "}
+                    items)
+                  </p>
+                </div>
+                {discrepancyProducts.length > 0 && (
+                  <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">
+                    {discrepancyProducts.length} Discrepancies
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="overflow-x-auto flex-1">
+            <div
+              className="overflow-x-auto flex-1"
+              style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}
+            >
               {offlineProducts.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <FaBarcode className="text-4xl mx-auto mb-3 text-gray-300" />
                   <p>No products marked offline yet</p>
-                  <p className="text-xs">Scan barcodes or add from online table</p>
+                  <p className="text-xs">
+                    Scan barcodes or add from online table
+                  </p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Product</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">Barcode</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Counted Qty</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500">Action</th>
+                      <th className="pl-1 py-3 text-left text-xs font-medium text-gray-500">
+                        Product
+                      </th>
+                      <th className="py-3 text-left text-xs font-medium text-gray-500">
+                        Barcode
+                      </th>
+                      <th className="py-3 text-center text-xs font-medium text-gray-500">
+                        Counted Qty
+                      </th>
+                      <th className="py-3 text-center text-xs font-medium text-gray-500">
+                        Status
+                      </th>
+                      <th className="py-3 text-center text-xs font-medium text-gray-500">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {offlineProducts.map((product) => (
-                      <tr key={product._id} className="bg-green-50 hover:bg-green-100">
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                          <p className="text-xs text-gray-500">{product.categoryName}</p>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                          {product.barcode || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
+                    {offlineProducts.map((product) => {
+                      const isDiscrepancy =
+                        product.countedQuantity > product.currentQty;
+                      const difference =
+                        product.countedQuantity - product.currentQty;
+
+                      return (
+                        <tr
+                          key={product._id}
+                          className={
+                            isDiscrepancy ? "bg-red-50" : "bg-green-50"
+                          }
+                        >
+                          <td className="pl-1 py-3">
+                            <p className="text-xs font-medium text-gray-800">
+                              {product.productName}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {product.categoryName}
+                            </p>
+                          </td>
+                          <td className="py-3 text-xs text-gray-500 font-mono">
+                            {product.barcode || "-"}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity - 1,
+                                  )
+                                }
+                                className="text-gray-500 hover:text-red-500"
+                                disabled={product.countedQuantity <= 1}
+                              >
+                                <FaMinus className="text-xs" />
+                              </button>
+                              <input
+                                type="number"
+                                value={product.countedQuantity}
+                                onChange={(e) =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    parseInt(e.target.value) || 0,
+                                  )
+                                }
+                                min="1"
+                                className={`w-10 px-2 py-1 text-sm text-center border rounded focus:ring-2 focus:ring-yellow-400 ${
+                                  isDiscrepancy
+                                    ? "border-red-400 bg-red-50 text-red-700"
+                                    : "border-gray-300 text-gray-700"
+                                }`}
+                              />
+                              <button
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity + 1,
+                                  )
+                                }
+                                className="text-gray-500 hover:text-green-500"
+                              >
+                                <FaPlus className="text-xs" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {isDiscrepancy ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[8px] bg-red-100 text-red-700">
+                                <FaExclamationTriangle className="text-xs" />{" "}
+                                Excess: +{difference}
+                              </span>
+                            ) : product.countedQuantity ===
+                              product.currentQty ? (
+                              <span className="inline-flex items-center gap-1 py-1 rounded-full text-[8px] bg-green-100 text-green-700">
+                                <FaCheckCircle className="text-xs" /> Matched
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[8px] bg-yellow-100 text-yellow-700">
+                                Partial: {product.countedQuantity}/
+                                {product.currentQty}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 text-center">
                             <button
-                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity - 1)}
-                              className="text-gray-500 hover:text-red-500"
-                              disabled={product.countedQuantity <= 1}
+                              onClick={() => removeFromOffline(product.barcode)}
+                              className="text-red-500 hover:text-red-700"
+                              title="Remove from offline"
                             >
-                              <FaMinus className="text-xs" />
+                              <FaTrash />
                             </button>
-                            <input
-                              type="number"
-                              value={product.countedQuantity}
-                              onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
-                              min="1"
-                              max={product.currentQty}
-                              className="w-16 px-2 py-1 text-sm text-center text-gray-700 border border-gray-300 rounded focus:ring-2 focus:ring-yellow-400"
-                            />
-                            <button
-                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity + 1)}
-                              className="text-gray-500 hover:text-green-500"
-                              disabled={product.countedQuantity >= product.currentQty}
-                            >
-                              <FaPlus className="text-xs" />
-                            </button>
-                            <span className="text-xs text-gray-500 ml-1">/ {product.currentQty}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => removeFromOffline(product.barcode)}
-                            className="text-red-500 hover:text-red-700"
-                            title="Remove from offline"
-                          >
-                            <FaTrash />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className="bg-gray-50">
                     <tr>
-                      <td colSpan="3" className="px-4 py-3 text-gray-600 text-right font-semibold">
-                        Total Unique Products:
+                      <td
+                        colSpan="2"
+                        className="px-4 py-3 text-right font-semibold"
+                      >
+                        Totals:
                       </td>
-                      <td className="px-4 py-3 text-center font-semibold text-green-600">
-                        {offlineProducts.length}
+                      <td className="px-4 py-3 text-center font-semibold">
+                        {offlineProducts.reduce(
+                          (sum, p) => sum + p.countedQuantity,
+                          0,
+                        )}
                       </td>
+                      <td className="px-4 py-3 text-center">
+                        {discrepancyProducts.length > 0 && (
+                          <span className="text-red-600 text-xs">
+                            {discrepancyProducts.length} discrepancies
+                          </span>
+                        )}
+                      </td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -673,7 +903,7 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal - Camera on top, scrollable content below */}
+      {/* Camera Modal */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -693,13 +923,17 @@ const InventoryCount = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Camera Section - Fixed at top */}
+              {/* Camera Section */}
               <div className="sticky top-0 bg-black z-10">
                 <div className="relative bg-black">
-                  <div 
-                    id="video-preview" 
+                  <div
+                    id="video-preview"
                     className="w-full h-auto"
-                    style={{ minHeight: "300px", maxHeight: "350px", objectFit: "cover" }}
+                    style={{
+                      minHeight: "300px",
+                      maxHeight: "350px",
+                      objectFit: "cover",
+                    }}
                   />
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
@@ -732,21 +966,28 @@ const InventoryCount = () => {
                 <div className="m-4 p-3 bg-green-100 border border-green-300 rounded-lg animate-bounce">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-green-800">✅ Recently Scanned</p>
-                      <p className="text-sm text-green-700">{lastScannedProduct.productName}</p>
-                      <p className="text-xs text-green-600">Barcode: {lastScannedProduct.barcode}</p>
+                      <p className="text-sm font-semibold text-green-800">
+                        ✅ Recently Scanned
+                      </p>
+                      <p className="text-sm text-green-700">
+                        {lastScannedProduct.productName}
+                      </p>
+                      <p className="text-xs text-green-600">
+                        Barcode: {lastScannedProduct.barcode}
+                      </p>
                     </div>
                     <span className="text-green-600 text-2xl">✓</span>
                   </div>
                 </div>
               )}
 
-              {/* Offline Products List - Scrollable */}
+              {/* Offline Products List */}
               <div className="p-4">
                 <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                  <FaCheckCircle className="text-green-500" /> Counted Products ({offlineProducts.length})
+                  <FaCheckCircle className="text-green-500" /> Counted Products
+                  ({offlineProducts.length})
                 </h3>
-                
+
                 {offlineProducts.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg">
                     <FaBarcode className="text-4xl mx-auto mb-2 text-gray-300" />
@@ -755,40 +996,71 @@ const InventoryCount = () => {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                    {offlineProducts.map((product) => (
-                      <div key={product._id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-800">{product.productName}</p>
-                          <p className="text-xs text-gray-500 font-mono">{product.barcode}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-1">
+                    {offlineProducts.map((product) => {
+                      const isDiscrepancy =
+                        product.countedQuantity > product.currentQty;
+                      return (
+                        <div
+                          key={product._id}
+                          className={`flex items-center justify-between p-3 rounded-lg border ${isDiscrepancy ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"}`}
+                        >
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-800">
+                              {product.productName}
+                            </p>
+                            <p className="text-xs text-gray-500 font-mono">
+                              {product.barcode}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity - 1,
+                                  )
+                                }
+                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
+                                disabled={product.countedQuantity <= 1}
+                              >
+                                <FaMinus className="text-xs" />
+                              </button>
+                              <span
+                                className={`w-10 text-center font-semibold ${isDiscrepancy ? "text-red-600" : "text-gray-800"}`}
+                              >
+                                {product.countedQuantity}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity + 1,
+                                  )
+                                }
+                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
+                              >
+                                <FaPlus className="text-xs" />
+                              </button>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                              / {product.currentQty}
+                            </span>
+                            {isDiscrepancy && (
+                              <span className="text-xs text-red-500 font-semibold">
+                                +{product.countedQuantity - product.currentQty}
+                              </span>
+                            )}
                             <button
-                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity - 1)}
-                              className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
-                              disabled={product.countedQuantity <= 1}
+                              onClick={() => removeFromOffline(product.barcode)}
+                              className="text-red-500 hover:text-red-700"
                             >
-                              <FaMinus className="text-xs" />
-                            </button>
-                            <span className="w-10 text-center font-semibold text-gray-800">{product.countedQuantity}</span>
-                            <button
-                              onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity + 1)}
-                              className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded hover:bg-gray-300"
-                              disabled={product.countedQuantity >= product.currentQty}
-                            >
-                              <FaPlus className="text-xs" />
+                              <FaTrash className="text-sm" />
                             </button>
                           </div>
-                          <span className="text-xs text-gray-500">/ {product.currentQty}</span>
-                          <button
-                            onClick={() => removeFromOffline(product.barcode)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <FaTrash className="text-sm" />
-                          </button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
