@@ -27,9 +27,9 @@ const InventoryCount = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showCamera, setShowCamera] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scannedBarcode, setScannedBarcode] = useState("");
   const [cameraError, setCameraError] = useState(false);
-  const [lastScannedProduct, setLastScannedProduct] = useState(null);
+  const [lastScannedBarcode, setLastScannedBarcode] = useState(null);
+  const [lastScanTime, setLastScanTime] = useState(0);
 
   const html5QrCodeRef = useRef(null);
   const audioRef = useRef(null);
@@ -93,7 +93,7 @@ const InventoryCount = () => {
       setTimeout(() => {
         oscillator.stop();
         audioContext.close();
-      }, 200);
+      }, 150);
     } catch (e) {
       console.log("Audio not supported");
     }
@@ -123,16 +123,18 @@ const InventoryCount = () => {
       (p) => p.barcode === product.barcode,
     );
 
+    let newTotal;
     if (existingOffline) {
-      const newQuantity = existingOffline.countedQuantity + quantity;
+      newTotal = existingOffline.countedQuantity + quantity;
       setOfflineProducts((prev) =>
         prev.map((p) =>
           p.barcode === product.barcode
-            ? { ...p, countedQuantity: newQuantity }
+            ? { ...p, countedQuantity: newTotal }
             : p,
         ),
       );
     } else {
+      newTotal = quantity;
       setOfflineProducts((prev) => [
         ...prev,
         {
@@ -156,12 +158,12 @@ const InventoryCount = () => {
 
     playBeep();
 
-    const newTotal = (existingOffline?.countedQuantity || 0) + quantity;
-
+    // Clear any pending toast timeout
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
 
+    // Show warning only when actually exceeding
     if (newTotal > product.currentQty) {
       toastTimeoutRef.current = setTimeout(() => {
         toast.warning(
@@ -169,9 +171,10 @@ const InventoryCount = () => {
           { duration: 3000 },
         );
       }, 100);
-    } else {
-      toast.success(`${product.productName} added to offline count`);
+    } else if (newTotal === product.currentQty) {
+      toast.success(`${product.productName} fully counted!`);
     }
+    // Removed the success toast for regular adds - only shows on full count
     return true;
   };
 
@@ -228,20 +231,27 @@ const InventoryCount = () => {
     }
   };
 
-  // Handle barcode scan - Keep camera open and restart after each scan
+  // Handle barcode scan - Prevent duplicate scans
   const handleBarcodeScan = useCallback(
     async (barcodeValue) => {
       if (!barcodeValue || scanning || isScanningRef.current) return;
 
+      // Prevent duplicate scan of same barcode within 2 seconds
+      const now = Date.now();
+      if (lastScannedBarcode === barcodeValue && now - lastScanTime < 2000) {
+        console.log("Duplicate scan ignored");
+        return;
+      }
+
       isScanningRef.current = true;
       setScanning(true);
+      setLastScannedBarcode(barcodeValue);
+      setLastScanTime(now);
 
       const product = onlineProducts.find((p) => p.barcode === barcodeValue);
 
       if (product) {
         addToOffline(product, 1);
-        setScannedBarcode(barcodeValue);
-        setLastScannedProduct(product);
         
         // Reset scanner to allow next scan
         setTimeout(async () => {
@@ -264,22 +274,16 @@ const InventoryCount = () => {
               startScanning();
             }, 500);
           }
-        }, 500);
-        
-        setTimeout(() => setScannedBarcode(""), 2000);
-        setTimeout(() => setLastScannedProduct(null), 3000);
+        }, 300);
       } else {
         toast.error(`Product with barcode ${barcodeValue} not found`);
-        setScannedBarcode("");
-        setLastScannedProduct(null);
-        
         setTimeout(() => {
           setScanning(false);
           isScanningRef.current = false;
-        }, 1500);
+        }, 1000);
       }
     },
-    [onlineProducts, showCamera],
+    [onlineProducts, showCamera, lastScannedBarcode, lastScanTime],
   );
 
   // Start barcode scanning with Html5Qrcode
@@ -366,6 +370,7 @@ const InventoryCount = () => {
   // Start scanning when modal opens
   useEffect(() => {
     if (showCamera) {
+      setLastScannedBarcode(null); // Reset last scanned barcode when modal opens
       setTimeout(() => {
         startScanning();
       }, 500);
@@ -457,9 +462,7 @@ const InventoryCount = () => {
           ${discrepancyProducts.length > 0 ? `
             <h2>⚠️ Discrepancy Report (Counted > Online Stock)</h2>
             <table>
-              <thead>
-                <tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Qty</th><th>Counted Qty</th><th>Difference</th></tr>
-              </thead>
+              <thead><tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Qty</th><th>Counted Qty</th><th>Difference</th></tr></thead>
               <tbody>
                 ${discrepancyProducts.map((product, idx) => `
                   <tr class="discrepancy">
@@ -478,9 +481,7 @@ const InventoryCount = () => {
           
           <h2>📋 Products Not Counted</h2>
           <table>
-            <thead>
-              <tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Quantity</th><th>Counted Quantity</th><th>Remaining</th></tr>
-            </thead>
+            <thead><tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Quantity</th><th>Counted Quantity</th><th>Remaining</th></tr></thead>
             <tbody>
               ${missingProducts.map((product, idx) => `
                 <tr>
@@ -900,19 +901,8 @@ const InventoryCount = () => {
                 )}
               </div>
 
-              {/* Recently Scanned Product */}
-              {lastScannedProduct && (
-                <div className="m-4 p-3 bg-green-100 border border-green-300 rounded-lg animate-bounce">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-green-800">✅ Recently Scanned</p>
-                      <p className="text-sm text-green-700">{lastScannedProduct.productName}</p>
-                      <p className="text-xs text-green-600">Barcode: {lastScannedProduct.barcode}</p>
-                    </div>
-                    <span className="text-green-600 text-2xl">✓</span>
-                  </div>
-                </div>
-              )}
+              {/* Recently Scanned Product - REMOVED the success bar */}
+              {/* The green banner is removed as requested */}
 
               {/* Offline Products List */}
               <div className="p-4">
