@@ -1,7 +1,7 @@
 // app/components/admin/services/InventoryCount.jsx
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   FaSearch,
   FaCamera,
@@ -14,6 +14,7 @@ import {
   FaPlus,
   FaMinus,
   FaExclamationTriangle,
+  FaCameraRetro,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -27,10 +28,11 @@ const InventoryCount = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showCamera, setShowCamera] = useState(false);
   const [cameraError, setCameraError] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [manualBarcode, setManualBarcode] = useState("");
 
-  const html5QrCodeRef = useRef(null);
   const scannerRef = useRef(null);
+  const videoPreviewRef = useRef(null);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -66,7 +68,7 @@ const InventoryCount = () => {
     };
   }, []);
 
-  // Play beep sound - ONLY for adding product
+  // Play beep sound
   const playBeep = () => {
     try {
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -104,7 +106,7 @@ const InventoryCount = () => {
     setDiscrepancyProducts(discrepancies);
   }, [offlineProducts]);
 
-  // SIMPLE: Add product to offline list - updates quantity, no duplicates
+  // Add product to offline list
   const addToOffline = (product, quantity = 1) => {
     setOfflineProducts(prev => {
       const existingIndex = prev.findIndex(p => p.barcode === product.barcode);
@@ -112,7 +114,6 @@ const InventoryCount = () => {
       let updatedList;
 
       if (existingIndex !== -1) {
-        // Update existing product
         newTotal = prev[existingIndex].countedQuantity + quantity;
         updatedList = [...prev];
         updatedList[existingIndex] = {
@@ -120,12 +121,10 @@ const InventoryCount = () => {
           countedQuantity: newTotal
         };
       } else {
-        // Add new product
         newTotal = quantity;
         updatedList = [...prev, { ...product, countedQuantity: quantity }];
       }
 
-      // Update online products list
       setOnlineProducts(prevOnline =>
         prevOnline.map(p =>
           p.barcode === product.barcode
@@ -134,10 +133,8 @@ const InventoryCount = () => {
         )
       );
 
-      // Play beep only on successful add
       playBeep();
 
-      // Show appropriate toast
       if (newTotal > product.currentQty) {
         toast.warning(`⚠️ EXCESS: ${product.productName} - Counted ${newTotal} (System: ${product.currentQty})`);
       } else if (newTotal === product.currentQty) {
@@ -195,37 +192,28 @@ const InventoryCount = () => {
     }
   };
 
-  // SIMPLE: Handle barcode scan - prevents multiple scans
-  const handleBarcodeScan = useCallback(async (barcodeValue) => {
-    // Prevent multiple simultaneous scans
-    if (isProcessing) {
-      console.log("Already processing a scan, ignoring...");
+  // Process a single barcode scan - MANUAL CONTROL
+  const processBarcode = async (barcodeValue) => {
+    if (!barcodeValue || barcodeValue.trim() === "") {
+      toast.error("Please enter a valid barcode");
       return;
     }
 
-    setIsProcessing(true);
-
     const product = onlineProducts.find(p => p.barcode === barcodeValue);
-
+    
     if (product) {
       addToOffline(product, 1);
+      setManualBarcode("");
     } else {
       toast.error(`Product with barcode ${barcodeValue} not found`);
     }
+  };
 
-    // Reset processing flag after delay to prevent rapid scans
-    setTimeout(() => {
-      setIsProcessing(false);
-    }, 1500);
-  }, [onlineProducts, isProcessing]);
-
-  // SIMPLE: Start scanning
-  const startScanning = useCallback(async () => {
+  // Start camera for manual capture
+  const startCamera = async () => {
     setCameraError(false);
-    setIsProcessing(false);
-
+    
     try {
-      // Clean up existing scanner
       if (scannerRef.current) {
         try {
           await scannerRef.current.stop();
@@ -235,7 +223,7 @@ const InventoryCount = () => {
       scannerRef.current = new Html5Qrcode("video-preview");
 
       const config = {
-        fps: 15,
+        fps: 10,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,
         formatsToSupport: [
@@ -251,24 +239,26 @@ const InventoryCount = () => {
         { facingMode: "environment" },
         config,
         (decodedText) => {
-          // Only process if not already processing
-          if (!isProcessing) {
-            handleBarcodeScan(decodedText);
-          }
+          // Stop scanning immediately after capturing one barcode
+          stopCamera();
+          // Process the captured barcode
+          processBarcode(decodedText);
         },
         (error) => {
-          // Silent fail - just keep scanning
+          // Silent fail
         }
       );
+      
+      setIsScanning(true);
     } catch (error) {
       console.error("Error starting camera:", error);
       toast.error("Failed to access camera. Please check permissions.");
       setCameraError(true);
     }
-  }, [handleBarcodeScan, isProcessing]);
+  };
 
-  // Stop scanning
-  const stopScanning = useCallback(async () => {
+  // Stop camera
+  const stopCamera = async () => {
     if (scannerRef.current) {
       try {
         await scannerRef.current.stop();
@@ -277,25 +267,16 @@ const InventoryCount = () => {
         console.error("Error stopping scanner:", error);
       }
     }
-    setIsProcessing(false);
-  }, []);
+    setIsScanning(false);
+  };
 
-  // Handle camera modal
-  useEffect(() => {
-    if (showCamera) {
-      setTimeout(() => {
-        startScanning();
-      }, 500);
-    } else {
-      stopScanning();
+  // Handle manual barcode input
+  const handleManualSubmit = (e) => {
+    e.preventDefault();
+    if (manualBarcode.trim()) {
+      processBarcode(manualBarcode.trim());
     }
-
-    return () => {
-      if (!showCamera) {
-        stopScanning();
-      }
-    };
-  }, [showCamera, startScanning, stopScanning]);
+  };
 
   // Print report
   const handlePrintMissing = () => {
@@ -327,7 +308,7 @@ const InventoryCount = () => {
             <p>Date: ${new Date().toLocaleString()}</p>
           </div>
           <h2>Summary</h2>
-          <tr>
+          <table>
             <tr><th>Total Products</th><td class="text-right">${onlineProducts.length}</td></tr>
             <tr><th>Total Counted Items</th><td class="text-right">${offlineProducts.reduce((s, p) => s + p.countedQuantity, 0)}</td></tr>
             <tr class="excess"><th>Excess Products</th><td class="text-right">${discrepancyProducts.length}</td></tr>
@@ -488,8 +469,8 @@ const InventoryCount = () => {
                               >
                                 + Add
                               </button>
-                            </td>
-                          </tr>
+                             </td>
+                           </tr>
                         );
                       })}
                     </tbody>
@@ -535,7 +516,7 @@ const InventoryCount = () => {
                           <td className="px-4 py-3">
                             <p className="font-medium text-gray-900">{product.productName}</p>
                             <p className="text-xs text-gray-600">{product.categoryName}</p>
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-xs font-mono text-gray-700">{product.barcode || "-"}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-2">
@@ -558,7 +539,7 @@ const InventoryCount = () => {
                                 <FaPlus />
                               </button>
                             </div>
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-center">
                             {isExcess ? (
                               <span className="text-red-700 text-xs font-bold">EXCESS +{product.countedQuantity - product.currentQty}</span>
@@ -567,7 +548,7 @@ const InventoryCount = () => {
                             ) : (
                               <span className="text-yellow-700 text-xs font-semibold">Partial</span>
                             )}
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-center">
                             <button 
                               onClick={() => removeFromOffline(product.barcode)} 
@@ -576,8 +557,8 @@ const InventoryCount = () => {
                             >
                               <FaTrash />
                             </button>
-                          </td>
-                        </tr>
+                           </td>
+                         </tr>
                       );
                     })}
                   </tbody>
@@ -588,65 +569,77 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal */}
+      {/* Camera Modal - MANUAL SCAN MODE */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4 flex justify-between items-center">
               <h2 className="text-xl font-bold text-white">Scan Barcode</h2>
-              <button onClick={() => setShowCamera(false)} className="text-white hover:text-gray-200 transition-colors">
+              <button 
+                onClick={() => {
+                  stopCamera();
+                  setShowCamera(false);
+                }} 
+                className="text-white hover:text-gray-200 transition-colors"
+              >
                 <FaTimes className="text-xl" />
               </button>
             </div>
             
             <div className="p-4">
-              <div id="video-preview" className="w-full bg-black rounded-lg" style={{ minHeight: "300px" }}></div>
+              {/* Camera Preview */}
+              <div className="relative">
+                <div id="video-preview" className="w-full bg-black rounded-lg" style={{ minHeight: "300px" }}></div>
+                {!isScanning && !cameraError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                    <button
+                      onClick={startCamera}
+                      className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <FaCameraRetro /> Start Camera to Scan
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              {isScanning && (
+                <div className="mt-3 text-center text-green-600 font-semibold">
+                  <FaSpinner className="inline animate-spin mr-2" />
+                  Camera active - Position barcode in frame
+                </div>
+              )}
               
               {cameraError && (
                 <button 
-                  onClick={startScanning} 
+                  onClick={startCamera} 
                   className="mt-4 w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   Retry Camera
                 </button>
               )}
               
-              {isProcessing && (
-                <div className="mt-4 text-center text-yellow-700 font-semibold">
-                  <FaSpinner className="inline animate-spin mr-2" />
-                  Processing scan... Please wait
-                </div>
-              )}
-              
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-800 mb-2">Manual Entry:</label>
-                <div className="flex gap-2">
+              {/* Manual Entry Section */}
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <label className="block text-sm font-medium text-gray-800 mb-2">Manual Barcode Entry:</label>
+                <form onSubmit={handleManualSubmit} className="flex gap-2">
                   <input
                     type="text"
-                    id="manual-barcode"
-                    placeholder="Enter barcode"
+                    value={manualBarcode}
+                    onChange={(e) => setManualBarcode(e.target.value)}
+                    placeholder="Enter barcode number"
                     className="flex-1 px-3 py-2 border rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter" && !isProcessing) {
-                        handleBarcodeScan(e.target.value);
-                        e.target.value = "";
-                      }
-                    }}
+                    autoFocus
                   />
                   <button
-                    onClick={() => {
-                      const input = document.getElementById("manual-barcode");
-                      if (input.value && !isProcessing) {
-                        handleBarcodeScan(input.value);
-                        input.value = "";
-                      }
-                    }}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400"
-                    disabled={isProcessing}
+                    type="submit"
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
                   >
-                    Add
+                    Add Product
                   </button>
-                </div>
+                </form>
+                <p className="text-xs text-gray-500 mt-2">
+                  Tip: Camera scans one barcode at a time. Click "Start Camera" to scan, then scan again for next product.
+                </p>
               </div>
             </div>
           </div>
