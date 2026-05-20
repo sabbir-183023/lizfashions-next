@@ -29,10 +29,9 @@ const InventoryCount = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const [manualBarcode, setManualBarcode] = useState("");
 
+  const toastLockRef = useRef(false);
   const scannerRef = useRef(null);
-  const videoPreviewRef = useRef(null);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -71,7 +70,9 @@ const InventoryCount = () => {
   // Play beep sound
   const playBeep = () => {
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
       oscillator.connect(gainNode);
@@ -108,8 +109,10 @@ const InventoryCount = () => {
 
   // Add product to offline list
   const addToOffline = (product, quantity = 1) => {
-    setOfflineProducts(prev => {
-      const existingIndex = prev.findIndex(p => p.barcode === product.barcode);
+    setOfflineProducts((prev) => {
+      const existingIndex = prev.findIndex(
+        (p) => p.barcode === product.barcode,
+      );
       let newTotal;
       let updatedList;
 
@@ -118,29 +121,47 @@ const InventoryCount = () => {
         updatedList = [...prev];
         updatedList[existingIndex] = {
           ...updatedList[existingIndex],
-          countedQuantity: newTotal
+          countedQuantity: newTotal,
         };
       } else {
         newTotal = quantity;
         updatedList = [...prev, { ...product, countedQuantity: quantity }];
       }
 
-      setOnlineProducts(prevOnline =>
-        prevOnline.map(p =>
+      setOnlineProducts((prevOnline) =>
+        prevOnline.map((p) =>
           p.barcode === product.barcode
             ? { ...p, counted: true, countedQuantity: newTotal }
-            : p
-        )
+            : p,
+        ),
       );
 
       playBeep();
 
-      if (newTotal > product.currentQty) {
-        toast.warning(`⚠️ EXCESS: ${product.productName} - Counted ${newTotal} (System: ${product.currentQty})`);
-      } else if (newTotal === product.currentQty) {
-        toast.success(`✅ ${product.productName} fully counted!`);
-      } else {
-        toast.success(`📦 ${product.productName}: ${newTotal}/${product.currentQty}`);
+      // Prevent duplicate toasts
+      if (!toastLockRef.current) {
+        toastLockRef.current = true;
+
+        if (newTotal > product.currentQty) {
+          toast.error(
+            `⚠️ EXCESS: ${product.productName} - Counted ${newTotal} (System: ${product.currentQty})`,
+            {
+              duration: 3000,
+              icon: "⚠️",
+            },
+          );
+        } else if (newTotal === product.currentQty) {
+          toast.success(`✅ ${product.productName} fully counted!`);
+        } else {
+          toast.success(
+            `📦 ${product.productName}: ${newTotal}/${product.currentQty}`,
+          );
+        }
+
+        // Reset toast lock after duration
+        setTimeout(() => {
+          toastLockRef.current = false;
+        }, 1000);
       }
 
       return updatedList;
@@ -149,15 +170,15 @@ const InventoryCount = () => {
 
   // Remove from offline list
   const removeFromOffline = (barcode) => {
-    const product = offlineProducts.find(p => p.barcode === barcode);
+    const product = offlineProducts.find((p) => p.barcode === barcode);
     if (product) {
-      setOfflineProducts(prev => prev.filter(p => p.barcode !== barcode));
-      setOnlineProducts(prev =>
-        prev.map(p =>
+      setOfflineProducts((prev) => prev.filter((p) => p.barcode !== barcode));
+      setOnlineProducts((prev) =>
+        prev.map((p) =>
           p.barcode === barcode
             ? { ...p, counted: false, countedQuantity: 0 }
-            : p
-        )
+            : p,
+        ),
       );
       toast.success(`${product.productName} removed`);
     }
@@ -165,7 +186,7 @@ const InventoryCount = () => {
 
   // Update offline product quantity
   const updateOfflineQuantity = (barcode, newQuantity) => {
-    const onlineProduct = onlineProducts.find(p => p.barcode === barcode);
+    const onlineProduct = onlineProducts.find((p) => p.barcode === barcode);
     if (!onlineProduct) return;
 
     if (newQuantity < 1) {
@@ -173,46 +194,73 @@ const InventoryCount = () => {
       return;
     }
 
-    setOfflineProducts(prev =>
-      prev.map(p =>
-        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p
-      )
+    setOfflineProducts((prev) =>
+      prev.map((p) =>
+        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
+      ),
     );
 
-    setOnlineProducts(prev =>
-      prev.map(p =>
-        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p
-      )
+    setOnlineProducts((prev) =>
+      prev.map((p) =>
+        p.barcode === barcode ? { ...p, countedQuantity: newQuantity } : p,
+      ),
     );
 
+    // Fixed: Use toast.error instead of toast.warning
     if (newQuantity > onlineProduct.currentQty) {
-      toast.warning(`⚠️ EXCESS: ${onlineProduct.productName} - Counted ${newQuantity} (System: ${onlineProduct.currentQty})`);
+      toast.error(
+        `⚠️ EXCESS: ${onlineProduct.productName} - Counted ${newQuantity} (System: ${onlineProduct.currentQty})`,
+        {
+          duration: 3000,
+          icon: "⚠️",
+        },
+      );
     } else if (newQuantity === onlineProduct.currentQty) {
       toast.success(`✅ ${onlineProduct.productName} fully counted!`);
     }
   };
+  const processingRef = useRef(false);
+  const lastScannedRef = useRef(null);
 
-  // Process a single barcode scan - MANUAL CONTROL
   const processBarcode = async (barcodeValue) => {
+    // Prevent duplicate processing
+    if (processingRef.current) {
+      console.log("Already processing a barcode, ignoring...");
+      return;
+    }
+
+    // Prevent processing same barcode twice in a row
+    if (lastScannedRef.current === barcodeValue) {
+      console.log("Duplicate barcode ignored:", barcodeValue);
+      return;
+    }
+
     if (!barcodeValue || barcodeValue.trim() === "") {
       toast.error("Please enter a valid barcode");
       return;
     }
 
-    const product = onlineProducts.find(p => p.barcode === barcodeValue);
-    
+    processingRef.current = true;
+    lastScannedRef.current = barcodeValue;
+
+    const product = onlineProducts.find((p) => p.barcode === barcodeValue);
+
     if (product) {
       addToOffline(product, 1);
-      setManualBarcode("");
     } else {
       toast.error(`Product with barcode ${barcodeValue} not found`);
     }
+
+    // Reset processing lock after delay
+    setTimeout(() => {
+      processingRef.current = false;
+    }, 1000);
   };
 
-  // Start camera for manual capture
+  // Start camera for scanning
   const startCamera = async () => {
     setCameraError(false);
-    
+
     try {
       if (scannerRef.current) {
         try {
@@ -239,16 +287,16 @@ const InventoryCount = () => {
         { facingMode: "environment" },
         config,
         (decodedText) => {
-          // Stop scanning immediately after capturing one barcode
+          // Stop camera immediately
           stopCamera();
-          // Process the captured barcode
+          // Process barcode with lock
           processBarcode(decodedText);
         },
         (error) => {
           // Silent fail
-        }
+        },
       );
-      
+
       setIsScanning(true);
     } catch (error) {
       console.error("Error starting camera:", error);
@@ -268,14 +316,6 @@ const InventoryCount = () => {
       }
     }
     setIsScanning(false);
-  };
-
-  // Handle manual barcode input
-  const handleManualSubmit = (e) => {
-    e.preventDefault();
-    if (manualBarcode.trim()) {
-      processBarcode(manualBarcode.trim());
-    }
   };
 
   // Print report
@@ -308,17 +348,21 @@ const InventoryCount = () => {
             <p>Date: ${new Date().toLocaleString()}</p>
           </div>
           <h2>Summary</h2>
-          <table>
+          </table>
             <tr><th>Total Products</th><td class="text-right">${onlineProducts.length}</td></tr>
             <tr><th>Total Counted Items</th><td class="text-right">${offlineProducts.reduce((s, p) => s + p.countedQuantity, 0)}</td></tr>
             <tr class="excess"><th>Excess Products</th><td class="text-right">${discrepancyProducts.length}</td></tr>
           </table>
-          ${discrepancyProducts.length > 0 ? `
+          ${
+            discrepancyProducts.length > 0
+              ? `
             <h2>Excess Products</h2>
             <table>
               <thead><tr><th>Product</th><th>Barcode</th><th>System Qty</th><th>Counted Qty</th><th>Excess</th></tr></thead>
               <tbody>
-                ${discrepancyProducts.map(p => `
+                ${discrepancyProducts
+                  .map(
+                    (p) => `
                   <tr class="excess">
                     <td>${p.productName}</td>
                     <td>${p.barcode || "-"}</td>
@@ -326,15 +370,21 @@ const InventoryCount = () => {
                     <td class="text-right">${p.countedQuantity}</td>
                     <td class="text-right">+${p.countedQuantity - p.currentQty}</td>
                   </tr>
-                `).join("")}
+                `,
+                  )
+                  .join("")}
               </tbody>
             </table>
-          ` : ""}
+          `
+              : ""
+          }
           <h2>Products Not Fully Counted</h2>
           <table>
             <thead><tr><th>Product</th><th>Barcode</th><th>System Qty</th><th>Counted</th><th>Remaining</th></tr></thead>
             <tbody>
-              ${missingProducts.map(p => `
+              ${missingProducts
+                .map(
+                  (p) => `
                 <tr>
                   <td>${p.productName}</td>
                   <td>${p.barcode || "-"}</td>
@@ -342,7 +392,9 @@ const InventoryCount = () => {
                   <td class="text-right">${p.countedQuantity || 0}</td>
                   <td class="text-right">${p.currentQty - (p.countedQuantity || 0)}</td>
                 </tr>
-              `).join("")}
+              `,
+                )
+                .join("")}
             </tbody>
           </table>
           <div class="footer"><p>Generated by Inventory Count System</p></div>
@@ -371,7 +423,9 @@ const InventoryCount = () => {
             {discrepancyProducts.length > 0 && (
               <div className="bg-red-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
                 <FaExclamationTriangle className="text-white" />
-                <span className="text-white">{discrepancyProducts.length} Excess</span>
+                <span className="text-white">
+                  {discrepancyProducts.length} Excess
+                </span>
               </div>
             )}
             <button
@@ -390,9 +444,19 @@ const InventoryCount = () => {
           <div className="flex items-center">
             <FaExclamationTriangle className="h-5 w-5 text-yellow-600 mr-3" />
             <p className="text-sm text-yellow-800">
-              <span className="font-bold text-yellow-900">⚠️ EXCESS INVENTORY DETECTED!</span><br />
-              <span className="text-yellow-700">{discrepancyProducts.length} product(s) have excess count. Total excess: +
-              {discrepancyProducts.reduce((sum, p) => sum + (p.countedQuantity - p.currentQty), 0)} units.</span>
+              <span className="font-bold text-yellow-900">
+                ⚠️ EXCESS INVENTORY DETECTED!
+              </span>
+              <br />
+              <span className="text-yellow-700">
+                {discrepancyProducts.length} product(s) have excess count. Total
+                excess: +
+                {discrepancyProducts.reduce(
+                  (sum, p) => sum + (p.countedQuantity - p.currentQty),
+                  0,
+                )}{" "}
+                units.
+              </span>
             </p>
           </div>
         </div>
@@ -405,8 +469,12 @@ const InventoryCount = () => {
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="font-semibold text-red-700">Online Products</h3>
-                  <p className="text-xs text-gray-600">Products that need counting</p>
+                  <h3 className="font-semibold text-red-700">
+                    Online Products
+                  </h3>
+                  <p className="text-xs text-gray-600">
+                    Products that need counting
+                  </p>
                 </div>
                 <button
                   onClick={() => setShowCamera(true)}
@@ -416,7 +484,10 @@ const InventoryCount = () => {
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto flex-1" style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+            <div
+              className="overflow-x-auto flex-1"
+              style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}
+            >
               {loading ? (
                 <div className="flex justify-center items-center py-12">
                   <FaSpinner className="animate-spin text-3xl text-yellow-600" />
@@ -438,27 +509,62 @@ const InventoryCount = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-gray-700 text-left font-semibold">Product</th>
-                        <th className="px-4 py-3 text-gray-700 text-left font-semibold">Barcode</th>
-                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">System</th>
-                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">Counted</th>
-                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">Action</th>
+                        <th className="px-4 py-3 text-gray-700 text-left font-semibold">
+                          Product
+                        </th>
+                        <th className="px-4 py-3 text-gray-700 text-left font-semibold">
+                          Barcode
+                        </th>
+                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                          System
+                        </th>
+                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                          Counted
+                        </th>
+                        <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                          Action
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredOnlineProducts.map((product) => {
-                        const counted = offlineProducts.find(p => p.barcode === product.barcode);
-                        const isExcess = counted && counted.countedQuantity > product.currentQty;
+                        const counted = offlineProducts.find(
+                          (p) => p.barcode === product.barcode,
+                        );
+                        const isExcess =
+                          counted &&
+                          counted.countedQuantity > product.currentQty;
                         return (
-                          <tr key={product._id} className={isExcess ? "bg-yellow-50" : "hover:bg-gray-50"}>
+                          <tr
+                            key={product._id}
+                            className={
+                              isExcess ? "bg-yellow-50" : "hover:bg-gray-50"
+                            }
+                          >
                             <td className="px-4 py-3">
-                              <p className="font-medium text-gray-900">{product.productName}</p>
-                              <p className="text-xs text-gray-600">{product.categoryName}</p>
+                              <p className="font-medium text-gray-900">
+                                {product.productName}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                {product.categoryName}
+                              </p>
                             </td>
-                            <td className="px-4 py-3 text-xs font-mono text-gray-700">{product.barcode || "-"}</td>
-                            <td className="px-4 py-3 text-center font-semibold text-gray-800">{product.currentQty}</td>
+                            <td className="px-4 py-3 text-xs font-mono text-gray-700">
+                              {product.barcode || "-"}
+                            </td>
+                            <td className="px-4 py-3 text-center font-semibold text-gray-800">
+                              {product.currentQty}
+                            </td>
                             <td className="px-4 py-3 text-center">
-                              <span className={isExcess ? "text-red-700 font-bold" : counted ? "text-green-700 font-semibold" : "text-gray-600"}>
+                              <span
+                                className={
+                                  isExcess
+                                    ? "text-red-700 font-bold"
+                                    : counted
+                                      ? "text-green-700 font-semibold"
+                                      : "text-gray-600"
+                                }
+                              >
                                 {counted?.countedQuantity || 0}
                               </span>
                             </td>
@@ -469,8 +575,8 @@ const InventoryCount = () => {
                               >
                                 + Add
                               </button>
-                             </td>
-                           </tr>
+                            </td>
+                          </tr>
                         );
                       })}
                     </tbody>
@@ -485,43 +591,77 @@ const InventoryCount = () => {
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="font-semibold text-green-700">Counted Products</h3>
-                  <p className="text-xs text-gray-600">{offlineProducts.length} items counted</p>
+                  <h3 className="font-semibold text-green-700">
+                    Counted Products
+                  </h3>
+                  <p className="text-xs text-gray-600">
+                    {offlineProducts.length} items counted
+                  </p>
                 </div>
               </div>
             </div>
-            <div className="overflow-x-auto flex-1" style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+            <div
+              className="overflow-x-auto flex-1"
+              style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}
+            >
               {offlineProducts.length === 0 ? (
                 <div className="text-center py-12">
                   <FaBarcode className="text-4xl mx-auto mb-3 text-gray-400" />
                   <p className="text-gray-600">No products counted yet</p>
-                  <p className="text-xs text-gray-500">Scan barcodes to begin</p>
+                  <p className="text-xs text-gray-500">
+                    Scan barcodes to begin
+                  </p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-3 text-gray-700 text-left font-semibold">Product</th>
-                      <th className="px-4 py-3 text-gray-700 text-left font-semibold">Barcode</th>
-                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">Counted</th>
-                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">Status</th>
-                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">Action</th>
+                      <th className="px-4 py-3 text-gray-700 text-left font-semibold">
+                        Product
+                      </th>
+                      <th className="px-4 py-3 text-gray-700 text-left font-semibold">
+                        Barcode
+                      </th>
+                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                        Counted
+                      </th>
+                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-gray-700 text-center font-semibold">
+                        Action
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {offlineProducts.map((product) => {
-                      const isExcess = product.countedQuantity > product.currentQty;
+                      const isExcess =
+                        product.countedQuantity > product.currentQty;
                       return (
-                        <tr key={product._id} className={isExcess ? "bg-red-50" : "bg-green-50"}>
+                        <tr
+                          key={product._id}
+                          className={isExcess ? "bg-red-50" : "bg-green-50"}
+                        >
                           <td className="px-4 py-3">
-                            <p className="font-medium text-gray-900">{product.productName}</p>
-                            <p className="text-xs text-gray-600">{product.categoryName}</p>
-                           </td>
-                          <td className="px-4 py-3 text-xs font-mono text-gray-700">{product.barcode || "-"}</td>
+                            <p className="font-medium text-gray-900">
+                              {product.productName}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              {product.categoryName}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-xs font-mono text-gray-700">
+                            {product.barcode || "-"}
+                          </td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <button
-                                onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity - 1)}
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity - 1,
+                                  )
+                                }
                                 className="text-gray-600 hover:text-red-600 transition-colors"
                               >
                                 <FaMinus />
@@ -529,36 +669,54 @@ const InventoryCount = () => {
                               <input
                                 type="number"
                                 value={product.countedQuantity}
-                                onChange={(e) => updateOfflineQuantity(product.barcode, parseInt(e.target.value) || 0)}
+                                onChange={(e) =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    parseInt(e.target.value) || 0,
+                                  )
+                                }
                                 className="w-16 px-2 py-1 text-center border rounded text-gray-800 font-semibold"
                               />
                               <button
-                                onClick={() => updateOfflineQuantity(product.barcode, product.countedQuantity + 1)}
+                                onClick={() =>
+                                  updateOfflineQuantity(
+                                    product.barcode,
+                                    product.countedQuantity + 1,
+                                  )
+                                }
                                 className="text-gray-600 hover:text-green-600 transition-colors"
                               >
                                 <FaPlus />
                               </button>
                             </div>
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             {isExcess ? (
-                              <span className="text-red-700 text-xs font-bold">EXCESS +{product.countedQuantity - product.currentQty}</span>
-                            ) : product.countedQuantity === product.currentQty ? (
-                              <span className="text-green-700 text-xs font-semibold">Matched</span>
+                              <span className="text-red-700 text-xs font-bold">
+                                EXCESS +
+                                {product.countedQuantity - product.currentQty}
+                              </span>
+                            ) : product.countedQuantity ===
+                              product.currentQty ? (
+                              <span className="text-green-700 text-xs font-semibold">
+                                Matched
+                              </span>
                             ) : (
-                              <span className="text-yellow-700 text-xs font-semibold">Partial</span>
+                              <span className="text-yellow-700 text-xs font-semibold">
+                                Partial
+                              </span>
                             )}
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-center">
-                            <button 
-                              onClick={() => removeFromOffline(product.barcode)} 
+                            <button
+                              onClick={() => removeFromOffline(product.barcode)}
                               className="text-red-600 hover:text-red-800 transition-colors"
                               title="Remove from offline"
                             >
                               <FaTrash />
                             </button>
-                           </td>
-                         </tr>
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -569,27 +727,31 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal - MANUAL SCAN MODE */}
+      {/* Camera Modal - Removed manual entry */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="bg-gradient-to-r from-blue-900 to-blue-800 px-6 py-4 flex justify-between items-center">
               <h2 className="text-xl font-bold text-white">Scan Barcode</h2>
-              <button 
+              <button
                 onClick={() => {
                   stopCamera();
                   setShowCamera(false);
-                }} 
+                }}
                 className="text-white hover:text-gray-200 transition-colors"
               >
                 <FaTimes className="text-xl" />
               </button>
             </div>
-            
+
             <div className="p-4">
               {/* Camera Preview */}
               <div className="relative">
-                <div id="video-preview" className="w-full bg-black rounded-lg" style={{ minHeight: "300px" }}></div>
+                <div
+                  id="video-preview"
+                  className="w-full bg-black rounded-lg"
+                  style={{ minHeight: "300px" }}
+                ></div>
                 {!isScanning && !cameraError && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
                     <button
@@ -601,44 +763,29 @@ const InventoryCount = () => {
                   </div>
                 )}
               </div>
-              
+
               {isScanning && (
                 <div className="mt-3 text-center text-green-600 font-semibold">
                   <FaSpinner className="inline animate-spin mr-2" />
-                  Camera active - Position barcode in frame
+                  Camera active - Scan one barcode at a time
                 </div>
               )}
-              
+
               {cameraError && (
-                <button 
-                  onClick={startCamera} 
+                <button
+                  onClick={startCamera}
                   className="mt-4 w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   Retry Camera
                 </button>
               )}
-              
-              {/* Manual Entry Section */}
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <label className="block text-sm font-medium text-gray-800 mb-2">Manual Barcode Entry:</label>
-                <form onSubmit={handleManualSubmit} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={manualBarcode}
-                    onChange={(e) => setManualBarcode(e.target.value)}
-                    placeholder="Enter barcode number"
-                    className="flex-1 px-3 py-2 border rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Add Product
-                  </button>
-                </form>
-                <p className="text-xs text-gray-500 mt-2">
-                  Tip: Camera scans one barcode at a time. Click "Start Camera" to scan, then scan again for next product.
+
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                <p className="text-sm text-blue-800 text-center">
+                  📷 Point camera at barcode. Camera will automatically stop
+                  after each scan.
+                  <br />
+                  Click "Start Camera" again for next product.
                 </p>
               </div>
             </div>
