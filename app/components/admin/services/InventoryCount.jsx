@@ -36,6 +36,7 @@ const InventoryCount = () => {
   const toastTimeoutRef = useRef(null);
   const processingRef = useRef(false);
   const scannerInitializedRef = useRef(false);
+  const scannerActiveRef = useRef(false);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -69,13 +70,13 @@ const InventoryCount = () => {
     audioRef.current = audio;
 
     return () => {
-      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-        html5QrCodeRef.current.stop().catch(console.error);
+      if (html5QrCodeRef.current && scannerActiveRef.current) {
+        stopScanning();
       }
     };
   }, []);
 
-  // Play beep sound
+  // Play beep sound - ONLY for adding product
   const playBeep = () => {
     try {
       const audioContext = new (
@@ -118,16 +119,18 @@ const InventoryCount = () => {
     setDiscrepancyProducts(discrepancies);
   }, [offlineProducts]);
 
-  // Add product to offline list - updates quantity, doesn't add duplicate
+  // Add product to offline list - Problem 2 fixed: Updates quantity instead of adding duplicate
   const addToOffline = (product, quantity = 1) => {
+    // Calculate new total quantity
     const existingOffline = offlineProducts.find(
       (p) => p.barcode === product.barcode,
     );
-
+    
     let newTotal;
     if (existingOffline) {
-      // Update existing product quantity instead of adding new entry
+      // Update existing product quantity (don't add duplicate)
       newTotal = existingOffline.countedQuantity + quantity;
+      
       setOfflineProducts((prev) =>
         prev.map((p) =>
           p.barcode === product.barcode
@@ -146,34 +149,41 @@ const InventoryCount = () => {
       ]);
     }
 
+    // Update online products list
     setOnlineProducts((prev) =>
       prev.map((p) =>
         p.barcode === product.barcode
           ? {
               ...p,
               counted: true,
-              countedQuantity: (p.countedQuantity || 0) + quantity,
+              countedQuantity: newTotal,
             }
           : p,
       ),
     );
 
+    // Play beep sound ONLY when adding product (Problem 3 fixed)
     playBeep();
 
+    // Clear previous toast timeout
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
 
+    // Check if quantity exceeds inventory (Problem 2 fixed: count as excess)
     if (newTotal > product.currentQty) {
       toastTimeoutRef.current = setTimeout(() => {
         toast.warning(
-          `⚠️ ${product.productName}: Counted ${newTotal} but online shows ${product.currentQty}`,
-          { duration: 3000 },
+          `⚠️ EXCESS: ${product.productName} - Counted ${newTotal} (System shows ${product.currentQty})`,
+          { duration: 3000, icon: '⚠️' }
         );
       }, 100);
     } else if (newTotal === product.currentQty) {
       toast.success(`${product.productName} fully counted!`);
+    } else {
+      toast.success(`${product.productName} added (${newTotal}/${product.currentQty})`);
     }
+    
     return true;
   };
 
@@ -218,11 +228,12 @@ const InventoryCount = () => {
       clearTimeout(toastTimeoutRef.current);
     }
 
+    // Check for excess
     if (newQuantity > onlineProduct.currentQty) {
       toastTimeoutRef.current = setTimeout(() => {
         toast.warning(
-          `⚠️ ${onlineProduct.productName}: Counted ${newQuantity} but online shows ${onlineProduct.currentQty}`,
-          { duration: 3000 },
+          `⚠️ EXCESS: ${onlineProduct.productName} - Counted ${newQuantity} (System shows ${onlineProduct.currentQty})`,
+          { duration: 3000, icon: '⚠️' }
         );
       }, 100);
     } else if (newQuantity === onlineProduct.currentQty) {
@@ -230,62 +241,60 @@ const InventoryCount = () => {
     }
   };
 
-  // Handle barcode scan - Prevent duplicate scans and keep scanner working
+  // Handle barcode scan - Problem 1 & 3 fixed: Scanner keeps working, beep only on add
   const handleBarcodeScan = useCallback(
     async (barcodeValue) => {
-      if (
-        !barcodeValue ||
-        isScanningRef.current ||
-        processingRef.current
-      ) {
+      // Prevent processing if already processing
+      if (processingRef.current) {
         console.log("Scan blocked - already processing");
         return;
       }
 
-      // Prevent duplicate scan of same barcode within 1.5 seconds
+      // Prevent duplicate scan of same barcode within 500ms
       const now = Date.now();
-      if (lastScannedBarcode === barcodeValue && now - lastScanTime < 1500) {
+      if (lastScannedBarcode === barcodeValue && now - lastScanTime < 500) {
         console.log("Duplicate scan ignored for:", barcodeValue);
         return;
       }
 
       processingRef.current = true;
-      isScanningRef.current = true;
       setLastScannedBarcode(barcodeValue);
       setLastScanTime(now);
 
       const product = onlineProducts.find((p) => p.barcode === barcodeValue);
 
       if (product) {
+        // This will play beep only when adding product
         addToOffline(product, 1);
       } else {
+        // No beep for errors (Problem 3 fixed)
         toast.error(`Product with barcode ${barcodeValue} not found`);
       }
 
-      // Reset flags after processing - but keep scanner running
+      // Reset processing flag quickly to allow next scan
       setTimeout(() => {
-        isScanningRef.current = false;
         processingRef.current = false;
-      }, 800);
+      }, 300); // Reduced from 800ms to 300ms for faster subsequent scans
     },
-    [onlineProducts, lastScannedBarcode, lastScanTime],
+    [onlineProducts, lastScannedBarcode, lastScanTime, addToOffline],
   );
 
-  // Start barcode scanning with Html5Qrcode
+  // Start barcode scanning - Problem 1 fixed: Scanner stays active
   const startScanning = useCallback(async () => {
     setCameraError(false);
 
     try {
-      // Clean up existing scanner
-      if (html5QrCodeRef.current) {
+      // Stop any existing scanner first
+      if (html5QrCodeRef.current && scannerActiveRef.current) {
         try {
           await html5QrCodeRef.current.stop();
+          scannerActiveRef.current = false;
         } catch (e) {
-          // Ignore stop errors
+          console.log("Error stopping existing scanner:", e);
         }
       }
 
-      // Create new scanner with enhanced config
+      // Create new scanner instance
       html5QrCodeRef.current = new Html5Qrcode("video-preview");
 
       const config = {
@@ -311,14 +320,15 @@ const InventoryCount = () => {
       };
 
       const qrCodeSuccessCallback = (decodedText) => {
-        // Always allow scanning, just check if we're not already processing
+        // Always process scan if not already processing
         if (!processingRef.current) {
           handleBarcodeScan(decodedText);
         }
       };
 
-      const qrCodeErrorCallback = () => {
-        // Silent fail - continues scanning
+      const qrCodeErrorCallback = (errorMessage) => {
+        // Silent fail - continues scanning without logging
+        // This prevents console spam and keeps scanner running
       };
 
       await html5QrCodeRef.current.start(
@@ -328,7 +338,10 @@ const InventoryCount = () => {
         qrCodeErrorCallback,
       );
       
+      scannerActiveRef.current = true;
       scannerInitializedRef.current = true;
+      console.log("Scanner started successfully");
+      
     } catch (error) {
       console.error("Error starting camera:", error);
       if (error.name === "NotAllowedError") {
@@ -341,38 +354,54 @@ const InventoryCount = () => {
         toast.error("Failed to access camera. Please check permissions.");
       }
       setCameraError(true);
+      scannerActiveRef.current = false;
     }
   }, [handleBarcodeScan]);
 
-  // Stop scanning
+  // Stop scanning properly
   const stopScanning = useCallback(async () => {
-    if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+    if (html5QrCodeRef.current && scannerActiveRef.current) {
       try {
         await html5QrCodeRef.current.stop();
+        scannerActiveRef.current = false;
         scannerInitializedRef.current = false;
+        console.log("Scanner stopped successfully");
       } catch (error) {
         console.error("Error stopping scanner:", error);
       }
     }
   }, []);
 
-  // Start scanning when modal opens
+  // Handle camera modal visibility
   useEffect(() => {
-    if (showCamera) {
-      setLastScannedBarcode(null);
-      setLastScanTime(0);
-      processingRef.current = false;
-      isScanningRef.current = false;
-      scannerInitializedRef.current = false;
-      setTimeout(() => {
-        startScanning();
-      }, 500);
-    } else {
-      stopScanning();
-    }
+    let mounted = true;
+    
+    const initScanner = async () => {
+      if (showCamera && mounted) {
+        // Reset state when opening camera
+        setLastScannedBarcode(null);
+        setLastScanTime(0);
+        processingRef.current = false;
+        scannerActiveRef.current = false;
+        
+        // Small delay to ensure DOM is ready
+        setTimeout(async () => {
+          if (mounted && showCamera) {
+            await startScanning();
+          }
+        }, 500);
+      } else if (!showCamera && mounted) {
+        await stopScanning();
+      }
+    };
+    
+    initScanner();
 
     return () => {
-      stopScanning();
+      mounted = false;
+      if (!showCamera) {
+        stopScanning();
+      }
     };
   }, [showCamera, startScanning, stopScanning]);
 
@@ -427,6 +456,11 @@ const InventoryCount = () => {
               color: #d32f2f;
               font-weight: bold;
             }
+            .excess {
+              background-color: #ffeb3b;
+              color: #d32f2f;
+              font-weight: bold;
+            }
             .missing-badge {
               color: #dc2626;
               font-weight: bold;
@@ -446,19 +480,38 @@ const InventoryCount = () => {
           </div>
           
           <h2>📊 Summary</h2>
-          <tr>
-            <tr><td>Total Online Products:</td><td class="text-right">${onlineProducts.length}</td></tr>
-            <tr><td>Total Counted Items:</td><td class="text-right">${offlineProducts.reduce((s, p) => s + p.countedQuantity, 0)}</td></tr>
-            <tr class="discrepancy"><td>⚠️ Discrepancies Found:</td><td class="text-right">${discrepancyProducts.length}</td></tr>
+          <table>
+            <tr>
+              <th>Total Online Products</th>
+              <td class="text-right">${onlineProducts.length}</td>
+            </tr>
+            <tr>
+              <th>Total Counted Items</th>
+              <td class="text-right">${offlineProducts.reduce((s, p) => s + p.countedQuantity, 0)}</td>
+            </tr>
+            <tr class="excess">
+              <th>⚠️ Excess Products (Counted > Stock)</th>
+              <td class="text-right">${discrepancyProducts.length}</td>
+            </tr>
           </table>
           
           ${discrepancyProducts.length > 0 ? `
-            <h2>⚠️ Discrepancy Report (Counted > Online Stock)</h2>
+            <h2>⚠️ Excess Products Report (Counted > System Stock)</h2>
             <table>
-              <thead><tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Qty</th><th>Counted Qty</th><th>Difference</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Product Name</th>
+                  <th>Barcode</th>
+                  <th>Category</th>
+                  <th>System Qty</th>
+                  <th>Counted Qty</th>
+                  <th>Excess Amount</th>
+                </tr>
+              </thead>
               <tbody>
                 ${discrepancyProducts.map((product, idx) => `
-                  <tr class="discrepancy">
+                  <tr class="excess">
                     <td>${idx + 1}</td>
                     <td>${product.productName}</td>
                     <td>${product.barcode || "-"}</td>
@@ -472,9 +525,19 @@ const InventoryCount = () => {
             </table>
           ` : ""}
           
-          <h2>📋 Products Not Counted</h2>
+          <h2>📋 Products Not Fully Counted</h2>
           <table>
-            <thead><tr><th>#</th><th>Product Name</th><th>Barcode</th><th>Category</th><th>Online Quantity</th><th>Counted Quantity</th><th>Remaining</th></tr></thead>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Product Name</th>
+                <th>Barcode</th>
+                <th>Category</th>
+                <th>System Quantity</th>
+                <th>Counted Quantity</th>
+                <th>Remaining to Count</th>
+              </tr>
+            </thead>
             <tbody>
               ${missingProducts.map((product, idx) => `
                 <tr>
@@ -521,7 +584,7 @@ const InventoryCount = () => {
             {discrepancyProducts.length > 0 && (
               <div className="bg-red-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
                 <FaExclamationTriangle />
-                <span>{discrepancyProducts.length} Discrepancies</span>
+                <span>{discrepancyProducts.length} Excess Products</span>
               </div>
             )}
             <button
@@ -534,7 +597,7 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Discrepancy Alert Banner */}
+      {/* Excess Alert Banner */}
       {discrepancyProducts.length > 0 && (
         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 m-4 rounded">
           <div className="flex items-center">
@@ -544,7 +607,7 @@ const InventoryCount = () => {
             <div className="ml-3">
               <p className="text-sm text-yellow-700">
                 <span className="font-bold">
-                  ⚠️ Inventory Discrepancy Detected!
+                  ⚠️ EXCESS INVENTORY DETECTED!
                 </span>
                 <br />
                 {discrepancyProducts.length} product(s) have been counted more
@@ -620,14 +683,14 @@ const InventoryCount = () => {
                         const offlineItem = offlineProducts.find(
                           (p) => p.barcode === product.barcode,
                         );
-                        const isDiscrepancy =
+                        const isExcess =
                           offlineItem &&
                           offlineItem.countedQuantity > product.currentQty;
 
                         return (
                           <tr
                             key={product._id}
-                            className={`hover:bg-gray-50 ${isDiscrepancy ? "bg-yellow-50" : ""}`}
+                            className={`hover:bg-gray-50 ${isExcess ? "bg-yellow-50" : ""}`}
                           >
                             <td className="px-4 py-3">
                               <div>
@@ -647,10 +710,10 @@ const InventoryCount = () => {
                             </td>
                             <td className="px-4 py-3 text-center">
                               <span
-                                className={`text-sm font-semibold ${isDiscrepancy ? "text-red-600" : product.counted ? "text-green-600" : "text-red-500"}`}
+                                className={`text-sm font-semibold ${isExcess ? "text-red-600" : product.counted ? "text-green-600" : "text-red-500"}`}
                               >
                                 {product.countedQuantity || 0}
-                                {isDiscrepancy && (
+                                {isExcess && (
                                   <FaExclamationTriangle className="inline ml-1 text-xs text-red-500" />
                                 )}
                               </span>
@@ -698,15 +761,15 @@ const InventoryCount = () => {
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="font-semibold text-green-600 flex items-center gap-2">
-                    <FaCheckCircle className="text-green-500" /> Offline Counted Products
+                    <FaCheckCircle className="text-green-500" /> Counted Products
                   </h3>
                   <p className="text-xs text-gray-500">
-                    Products marked as counted offline ({offlineProducts.length} items)
+                    Products marked as counted ({offlineProducts.length} items)
                   </p>
                 </div>
                 {discrepancyProducts.length > 0 && (
                   <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">
-                    {discrepancyProducts.length} Discrepancies
+                    {discrepancyProducts.length} Excess
                   </span>
                 )}
               </div>
@@ -719,7 +782,7 @@ const InventoryCount = () => {
               {offlineProducts.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <FaBarcode className="text-4xl mx-auto mb-3 text-gray-300" />
-                  <p>No products marked offline yet</p>
+                  <p>No products counted yet</p>
                   <p className="text-xs">Scan barcodes or add from online table</p>
                 </div>
               ) : (
@@ -735,7 +798,7 @@ const InventoryCount = () => {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {offlineProducts.map((product) => {
-                      const isDiscrepancy =
+                      const isExcess =
                         product.countedQuantity > product.currentQty;
                       const difference =
                         product.countedQuantity - product.currentQty;
@@ -744,7 +807,7 @@ const InventoryCount = () => {
                         <tr
                           key={product._id}
                           className={
-                            isDiscrepancy ? "bg-red-50" : "bg-green-50"
+                            isExcess ? "bg-red-50" : "bg-green-50"
                           }
                         >
                           <td className="px-4 py-3">
@@ -783,7 +846,7 @@ const InventoryCount = () => {
                                 }
                                 min="1"
                                 className={`w-16 px-2 py-1 text-sm text-center border rounded focus:ring-2 focus:ring-yellow-400 ${
-                                  isDiscrepancy
+                                  isExcess
                                     ? "border-red-400 bg-red-50 text-red-700"
                                     : "border-gray-300 text-gray-700"
                                 }`}
@@ -802,9 +865,9 @@ const InventoryCount = () => {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            {isDiscrepancy ? (
+                            {isExcess ? (
                               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">
-                                <FaExclamationTriangle className="text-xs" /> Excess: +{difference}
+                                <FaExclamationTriangle className="text-xs" /> EXCESS: +{difference}
                               </span>
                             ) : product.countedQuantity ===
                               product.currentQty ? (
@@ -832,14 +895,14 @@ const InventoryCount = () => {
                   </tbody>
                   <tfoot className="bg-gray-50">
                     <tr>
-                      <td colSpan="2" className="px-4 py-3 text-right font-semibold">Totals:</td>
+                      <td colSpan="2" className="px-4 py-3 text-right font-semibold">Total Counted:</td>
                       <td className="px-4 py-3 text-center font-semibold">
                         {offlineProducts.reduce((sum, p) => sum + p.countedQuantity, 0)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {discrepancyProducts.length > 0 && (
-                          <span className="text-red-600 text-xs">
-                            {discrepancyProducts.length} discrepancies
+                          <span className="text-red-600 text-xs font-semibold">
+                            {discrepancyProducts.length} excess items
                           </span>
                         )}
                       </td>
@@ -873,7 +936,7 @@ const InventoryCount = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Camera Section */}
+              {/* Camera Section - Problem 1 fixed: Scanner stays active */}
               <div className="sticky top-0 bg-black z-10">
                 <div className="relative bg-black">
                   <div
@@ -906,12 +969,12 @@ const InventoryCount = () => {
 
                 {!cameraError && (
                   <div className="text-center text-sm text-gray-600 py-2 bg-gray-100">
-                    Position the barcode in the center of the frame
+                    Position barcode in the center - Scanner stays active after each scan
                   </div>
                 )}
               </div>
 
-              {/* Offline Products List */}
+              {/* Counted Products List */}
               <div className="p-4">
                 <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                   <FaCheckCircle className="text-green-500" /> Counted Products ({offlineProducts.length})
@@ -926,12 +989,12 @@ const InventoryCount = () => {
                 ) : (
                   <div className="space-y-2 max-h-[300px] overflow-y-auto">
                     {offlineProducts.map((product) => {
-                      const isDiscrepancy =
+                      const isExcess =
                         product.countedQuantity > product.currentQty;
                       return (
                         <div
                           key={product._id}
-                          className={`flex items-center justify-between p-3 rounded-lg border ${isDiscrepancy ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"}`}
+                          className={`flex items-center justify-between p-3 rounded-lg border ${isExcess ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"}`}
                         >
                           <div className="flex-1">
                             <p className="text-sm font-medium text-gray-800">{product.productName}</p>
@@ -949,7 +1012,7 @@ const InventoryCount = () => {
                                 <FaMinus className="text-xs" />
                               </button>
                               <span
-                                className={`w-10 text-center font-semibold ${isDiscrepancy ? "text-red-600" : "text-gray-800"}`}
+                                className={`w-10 text-center font-semibold ${isExcess ? "text-red-600" : "text-gray-800"}`}
                               >
                                 {product.countedQuantity}
                               </span>
@@ -963,7 +1026,7 @@ const InventoryCount = () => {
                               </button>
                             </div>
                             <span className="text-xs text-gray-500">/ {product.currentQty}</span>
-                            {isDiscrepancy && (
+                            {isExcess && (
                               <span className="text-xs text-red-500 font-semibold">
                                 +{product.countedQuantity - product.currentQty}
                               </span>
