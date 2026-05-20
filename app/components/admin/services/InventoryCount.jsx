@@ -14,6 +14,8 @@ import {
   FaPlus,
   FaMinus,
   FaExclamationTriangle,
+  FaPause,
+  FaPlay,
 } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -27,16 +29,13 @@ const InventoryCount = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showCamera, setShowCamera] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+  const [isScannerPaused, setIsScannerPaused] = useState(false);
   const [lastScannedBarcode, setLastScannedBarcode] = useState(null);
-  const [lastScanTime, setLastScanTime] = useState(0);
-  const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   const html5QrCodeRef = useRef(null);
-  const audioRef = useRef(null);
-  const toastTimeoutRef = useRef(null);
-  const processingRef = useRef(false);
   const scannerActiveRef = useRef(false);
-  const cooldownIntervalRef = useRef(null);
+  const processingRef = useRef(false);
+  const toastTimeoutRef = useRef(null);
 
   // Fetch online products from inventory
   const fetchOnlineProducts = async () => {
@@ -65,21 +64,15 @@ const InventoryCount = () => {
 
   useEffect(() => {
     fetchOnlineProducts();
-    // Create beep audio element
-    const audio = new Audio("/beep.mp3");
-    audioRef.current = audio;
 
     return () => {
       if (html5QrCodeRef.current && scannerActiveRef.current) {
         stopScanning();
       }
-      if (cooldownIntervalRef.current) {
-        clearInterval(cooldownIntervalRef.current);
-      }
     };
   }, []);
 
-  // Play beep sound - ONLY for adding product
+  // Play beep sound - ONLY for adding product (Problem 3 fixed)
   const playBeep = () => {
     try {
       const audioContext = new (
@@ -123,7 +116,7 @@ const InventoryCount = () => {
   }, [offlineProducts]);
 
   // Add product to offline list - Problem 2 fixed: Updates quantity instead of adding duplicate
-  const addToOffline = (product, quantity = 1) => {
+  const addToOffline = useCallback((product, quantity = 1) => {
     // Calculate new total quantity
     const existingOffline = offlineProducts.find(
       (p) => p.barcode === product.barcode,
@@ -188,7 +181,7 @@ const InventoryCount = () => {
     }
     
     return true;
-  };
+  }, [offlineProducts]);
 
   // Remove from offline list
   const removeFromOffline = (barcode) => {
@@ -244,36 +237,12 @@ const InventoryCount = () => {
     }
   };
 
-  // Start cooldown timer - Problem 4 fixed: 2 second delay between scans
-  const startCooldown = useCallback(() => {
-    setCooldownRemaining(2);
-    
-    if (cooldownIntervalRef.current) {
-      clearInterval(cooldownIntervalRef.current);
-    }
-    
-    cooldownIntervalRef.current = setInterval(() => {
-      setCooldownRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(cooldownIntervalRef.current);
-          cooldownIntervalRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  // Handle barcode scan - Problem 1, 3, & 4 fixed: 2 second delay between scans
+  // Handle barcode scan - Problem 1, 3, 4 fixed: Manual pause/resume
   const handleBarcodeScan = useCallback(
     async (barcodeValue) => {
-      // Problem 4: Check if cooldown is active
-      if (cooldownRemaining > 0) {
-        console.log(`Scan blocked - cooldown active (${cooldownRemaining}s remaining)`);
-        toast.error(`Please wait ${cooldownRemaining} second(s) before next scan`, {
-          duration: 1000,
-          icon: '⏱️'
-        });
+      // Don't process if scanner is paused
+      if (isScannerPaused) {
+        console.log("Scan blocked - scanner is paused");
         return;
       }
 
@@ -283,41 +252,67 @@ const InventoryCount = () => {
         return;
       }
 
-      // Prevent duplicate scan of same barcode within 500ms (additional safety)
-      const now = Date.now();
-      if (lastScannedBarcode === barcodeValue && now - lastScanTime < 500) {
+      // Prevent duplicate scan of same barcode
+      if (lastScannedBarcode === barcodeValue) {
         console.log("Duplicate scan ignored for:", barcodeValue);
         return;
       }
 
       processingRef.current = true;
       setLastScannedBarcode(barcodeValue);
-      setLastScanTime(now);
 
       const product = onlineProducts.find((p) => p.barcode === barcodeValue);
 
       if (product) {
         // This will play beep only when adding product
         addToOffline(product, 1);
-        // Start 2 second cooldown after successful scan (Problem 4)
-        startCooldown();
+        // Auto-pause after successful scan (Problem 4 fixed)
+        setIsScannerPaused(true);
+        toast.success(`Scan complete! Click "Resume" to scan next item`, {
+          duration: 2000,
+          icon: '✅'
+        });
       } else {
         // No beep for errors (Problem 3 fixed)
         toast.error(`Product with barcode ${barcodeValue} not found`);
+        // Reset processing flag for errors
+        setTimeout(() => {
+          processingRef.current = false;
+        }, 500);
       }
 
-      // Reset processing flag after short delay
+      // Reset processing flag after delay
       setTimeout(() => {
         processingRef.current = false;
-      }, 500);
+        setLastScannedBarcode(null);
+      }, 1000);
     },
-    [onlineProducts, lastScannedBarcode, lastScanTime, addToOffline, startCooldown, cooldownRemaining],
+    [onlineProducts, addToOffline, isScannerPaused, lastScannedBarcode]
   );
+
+  // Resume scanning (Problem 4 fixed)
+  const resumeScanning = useCallback(() => {
+    setIsScannerPaused(false);
+    setLastScannedBarcode(null);
+    processingRef.current = false;
+    toast.success("Scanner resumed! Ready for next scan", {
+      duration: 1500,
+      icon: '🎯'
+    });
+  }, []);
+
+  // Pause scanning
+  const pauseScanning = useCallback(() => {
+    setIsScannerPaused(true);
+    toast.info("Scanner paused", { duration: 1500, icon: '⏸️' });
+  }, []);
 
   // Start barcode scanning - Problem 1 fixed: Scanner stays active
   const startScanning = useCallback(async () => {
     setCameraError(false);
-    setCooldownRemaining(0); // Reset cooldown when starting
+    setIsScannerPaused(false);
+    setLastScannedBarcode(null);
+    processingRef.current = false;
 
     try {
       // Stop any existing scanner first
@@ -356,8 +351,8 @@ const InventoryCount = () => {
       };
 
       const qrCodeSuccessCallback = (decodedText) => {
-        // Process scan if not on cooldown and not already processing
-        if (cooldownRemaining === 0 && !processingRef.current) {
+        // Process scan only if not paused and not already processing
+        if (!isScannerPaused && !processingRef.current) {
           handleBarcodeScan(decodedText);
         }
       };
@@ -391,7 +386,7 @@ const InventoryCount = () => {
       setCameraError(true);
       scannerActiveRef.current = false;
     }
-  }, [handleBarcodeScan, cooldownRemaining]);
+  }, [handleBarcodeScan, isScannerPaused]);
 
   // Stop scanning properly
   const stopScanning = useCallback(async () => {
@@ -404,12 +399,9 @@ const InventoryCount = () => {
         console.error("Error stopping scanner:", error);
       }
     }
-    // Clear cooldown interval when stopping
-    if (cooldownIntervalRef.current) {
-      clearInterval(cooldownIntervalRef.current);
-      cooldownIntervalRef.current = null;
-    }
-    setCooldownRemaining(0);
+    setIsScannerPaused(false);
+    setLastScannedBarcode(null);
+    processingRef.current = false;
   }, []);
 
   // Handle camera modal visibility
@@ -419,17 +411,10 @@ const InventoryCount = () => {
     const initScanner = async () => {
       if (showCamera && mounted) {
         // Reset state when opening camera
+        setIsScannerPaused(false);
         setLastScannedBarcode(null);
-        setLastScanTime(0);
         processingRef.current = false;
         scannerActiveRef.current = false;
-        setCooldownRemaining(0);
-        
-        // Clear any existing cooldown interval
-        if (cooldownIntervalRef.current) {
-          clearInterval(cooldownIntervalRef.current);
-          cooldownIntervalRef.current = null;
-        }
         
         // Small delay to ensure DOM is ready
         setTimeout(async () => {
@@ -497,11 +482,6 @@ const InventoryCount = () => {
             }
             .text-right {
               text-align: right;
-            }
-            .discrepancy {
-              background-color: #ffeb3b;
-              color: #d32f2f;
-              font-weight: bold;
             }
             .excess {
               background-color: #ffeb3b;
@@ -754,7 +734,7 @@ const InventoryCount = () => {
                             </td>
                             <td className="px-4 py-3 text-center text-sm font-semibold text-gray-800">
                               {product.currentQty}
-                             </td>
+                            </td>
                             <td className="px-4 py-3 text-center">
                               <span
                                 className={`text-sm font-semibold ${isExcess ? "text-red-600" : product.counted ? "text-green-600" : "text-red-500"}`}
@@ -802,7 +782,7 @@ const InventoryCount = () => {
             </div>
           </div>
 
-          {/* Offline Products Table */}
+          {/* Offline Products Table - Problem 5: Scanned products appear here */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col h-[50vh] md:h-full">
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
               <div className="flex justify-between items-center">
@@ -864,10 +844,10 @@ const InventoryCount = () => {
                             <p className="text-xs text-gray-500">
                               {product.categoryName}
                             </p>
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-xs text-gray-500 font-mono">
                             {product.barcode || "-"}
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <button
@@ -910,7 +890,7 @@ const InventoryCount = () => {
                                 <FaPlus className="text-xs" />
                               </button>
                             </div>
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             {isExcess ? (
                               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">
@@ -926,7 +906,7 @@ const InventoryCount = () => {
                                 Partial: {product.countedQuantity}/{product.currentQty}
                               </span>
                             )}
-                           </td>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             <button
                               onClick={() => removeFromOffline(product.barcode)}
@@ -935,8 +915,8 @@ const InventoryCount = () => {
                             >
                               <FaTrash />
                             </button>
-                           </td>
-                         </tr>
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -945,14 +925,14 @@ const InventoryCount = () => {
                       <td colSpan="2" className="px-4 py-3 text-right font-semibold">Total Counted:</td>
                       <td className="px-4 py-3 text-center font-semibold">
                         {offlineProducts.reduce((sum, p) => sum + p.countedQuantity, 0)}
-                       </td>
+                      </td>
                       <td className="px-4 py-3 text-center">
                         {discrepancyProducts.length > 0 && (
                           <span className="text-red-600 text-xs font-semibold">
                             {discrepancyProducts.length} excess items
                           </span>
                         )}
-                       </td>
+                      </td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -963,7 +943,7 @@ const InventoryCount = () => {
         </div>
       </div>
 
-      {/* Camera Modal */}
+      {/* Camera Modal with Pause/Resume Button - Problem 4 fixed */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -983,7 +963,7 @@ const InventoryCount = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Camera Section - Problem 1 & 4 fixed: Scanner stays active with cooldown */}
+              {/* Camera Section */}
               <div className="sticky top-0 bg-black z-10">
                 <div className="relative bg-black">
                   <div
@@ -998,14 +978,37 @@ const InventoryCount = () => {
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-64 h-32 border-2 border-yellow-400 rounded-lg animate-pulse"></div>
                   </div>
+                  
+                  {/* Scanner Status Overlay - Problem 4 */}
+                  {isScannerPaused && (
+                    <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-yellow-400 text-5xl mb-2">⏸️</div>
+                        <p className="text-white font-semibold text-lg">Scanner Paused</p>
+                        <p className="text-gray-300 text-sm mt-1">Click Resume to continue scanning</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Cooldown Indicator - Problem 4 */}
-                {cooldownRemaining > 0 && (
-                  <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm font-bold animate-pulse">
-                    ⏱️ {cooldownRemaining}s
-                  </div>
-                )}
+                {/* Pause/Resume Controls - Problem 4 fixed */}
+                <div className="flex gap-2 p-3 bg-gray-100">
+                  {!isScannerPaused ? (
+                    <button
+                      onClick={pauseScanning}
+                      className="flex-1 bg-yellow-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-yellow-600 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <FaPause /> Pause Scanner
+                    </button>
+                  ) : (
+                    <button
+                      onClick={resumeScanning}
+                      className="flex-1 bg-green-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-600 transition-colors flex items-center justify-center gap-2 animate-pulse"
+                    >
+                      <FaPlay /> Resume Scanner
+                    </button>
+                  )}
+                </div>
 
                 {cameraError && (
                   <div className="text-center p-4">
@@ -1023,17 +1026,17 @@ const InventoryCount = () => {
 
                 {!cameraError && (
                   <div className="text-center text-sm text-gray-600 py-2 bg-gray-100">
-                    {cooldownRemaining > 0 
-                      ? `Please wait ${cooldownRemaining} second(s) before next scan...` 
-                      : "Position barcode in the center - Scanner stays active after each scan"}
+                    {isScannerPaused 
+                      ? "⏸️ Scanner paused - Click 'Resume Scanner' to continue" 
+                      : "🎯 Scanner active - Position barcode in the center"}
                   </div>
                 )}
               </div>
 
-              {/* Counted Products List */}
+              {/* Counted Products List - Problem 5: Shows scanned products */}
               <div className="p-4">
                 <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                  <FaCheckCircle className="text-green-500" /> Counted Products ({offlineProducts.length})
+                  <FaCheckCircle className="text-green-500" /> Recently Counted Products ({offlineProducts.length})
                 </h3>
 
                 {offlineProducts.length === 0 ? (
@@ -1044,7 +1047,7 @@ const InventoryCount = () => {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                    {offlineProducts.map((product) => {
+                    {offlineProducts.slice().reverse().map((product) => {
                       const isExcess =
                         product.countedQuantity > product.currentQty;
                       return (
@@ -1112,30 +1115,30 @@ const InventoryCount = () => {
                       placeholder="Enter barcode number"
                       className="flex-1 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                       onKeyPress={(e) => {
-                        if (e.key === "Enter" && cooldownRemaining === 0) {
+                        if (e.key === "Enter" && !isScannerPaused) {
                           handleBarcodeScan(e.target.value);
                           e.target.value = "";
-                        } else if (e.key === "Enter" && cooldownRemaining > 0) {
-                          toast.error(`Please wait ${cooldownRemaining} second(s) before next scan`);
+                        } else if (e.key === "Enter" && isScannerPaused) {
+                          toast.error("Scanner is paused. Click 'Resume Scanner' first");
                         }
                       }}
                     />
                     <button
                       onClick={() => {
                         const input = document.getElementById("manual-barcode");
-                        if (input.value && cooldownRemaining === 0) {
+                        if (input.value && !isScannerPaused) {
                           handleBarcodeScan(input.value);
                           input.value = "";
-                        } else if (input.value && cooldownRemaining > 0) {
-                          toast.error(`Please wait ${cooldownRemaining} second(s) before next scan`);
+                        } else if (input.value && isScannerPaused) {
+                          toast.error("Scanner is paused. Click 'Resume Scanner' first");
                         }
                       }}
                       className={`px-4 py-2 rounded-lg transition-colors ${
-                        cooldownRemaining > 0 
+                        isScannerPaused 
                           ? "bg-gray-400 cursor-not-allowed" 
                           : "bg-green-600 hover:bg-green-700"
                       } text-white`}
-                      disabled={cooldownRemaining > 0}
+                      disabled={isScannerPaused}
                     >
                       Add
                     </button>
@@ -1145,13 +1148,13 @@ const InventoryCount = () => {
             </div>
 
             {/* Footer Buttons */}
-            <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200">
+            <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200 flex gap-2">
               <button
                 onClick={() => {
                   setShowCamera(false);
                   stopScanning();
                 }}
-                className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
+                className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
               >
                 Close Scanner
               </button>
